@@ -1,0 +1,21 @@
+# CodeSync Next.js Migration Tasks
+
+- [x] Scaffolding Next.js App
+  - [x] Stop old server
+  - [x] Create Next.js project
+  - [x] Remove boilerplate & config styles
+- [x] Create Next.js components
+  - [x] src/app/globals.css layout & animations
+  - [x] src/app/layout.js font imports & CodeMirror libraries
+  - [x] src/app/page.js Landing component
+  - [x] src/app/room/[roomId]/page.js dynamic Route editor workspace
+- [x] Align with codeshare.io (No code execution, clean design)
+  - [x] Remove compiler and sandboxed outputs
+  - [x] Implement Collapsible Sidebar panel for Live Chat
+  - [x] Implement dynamic CodeMirror layout refreshes on window adjustments
+- [x] Bug Fixes
+  - [x] Resolve WebSocket hydration race condition for dynamic room IDs
+- [x] Create custom Next.js server
+  - [x] server.js
+- [x] Install package dependencies (`ws`, etc.)
+- [x] Verify & run dev server
