@@ -15,7 +15,7 @@ const rooms = new Map();
 // Helper to generate a random bright color for users
 function getRandomColor() {
   const colors = [
-    '#ff5733', '#33ff57', '#3357ff', '#f3ff33', '#ff33f3', 
+    '#ff5733', '#33ff57', '#3357ff', '#f3ff33', '#ff33f3',
     '#33fff3', '#ff8333', '#8333ff', '#33ff83', '#ff3383',
     '#00d4ff', '#ff007f', '#e0b0ff', '#39ff14', '#ff7518'
   ];
@@ -57,20 +57,20 @@ app.prepare().then(() => {
     ws.on('message', (message) => {
       try {
         const data = JSON.parse(message);
-        
+
         switch (data.type) {
           case 'join': {
             const { roomId, nickname } = data;
             currentRoomId = roomId;
             userId = Math.random().toString(36).substring(2, 9);
-            
+
             if (!rooms.has(roomId)) {
               rooms.set(roomId, {
-                code: '// Welcome to CodeSync! Share this URL with others to collaborate.\n',
+                code: '// Welcome to HiveCode! Share this URL with others to collaborate.\n',
                 users: new Map()
               });
             }
-            
+
             const room = rooms.get(roomId);
             const userObj = {
               id: userId,
@@ -78,7 +78,7 @@ app.prepare().then(() => {
               color: getRandomColor(),
               cursor: null
             };
-            
+
             room.users.set(ws, userObj);
 
             // Send current state to the joining user
@@ -108,7 +108,7 @@ app.prepare().then(() => {
                 type: 'code-update',
                 code: data.code,
                 userId: userId
-            }, ws);
+              }, ws);
             }
             break;
           }
@@ -159,10 +159,10 @@ app.prepare().then(() => {
       if (currentRoomId && rooms.has(currentRoomId)) {
         const room = rooms.get(currentRoomId);
         const departingUser = room.users.get(ws);
-        
+
         if (departingUser) {
           room.users.delete(ws);
-          
+
           // If room is empty, clean it up
           if (room.users.size === 0) {
             rooms.delete(currentRoomId);
@@ -193,6 +193,6 @@ app.prepare().then(() => {
 
   server.listen(PORT, (err) => {
     if (err) throw err;
-    console.log(`> CodeSync Next.js Server ready on http://localhost:${PORT}`);
+    console.log(`> HiveCode Next.js Server ready on http://localhost:${PORT}`);
   });
 });

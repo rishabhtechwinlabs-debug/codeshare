@@ -11,7 +11,7 @@ export default function RoomPage() {
   const [nickname, setNickname] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [modalNickname, setModalNickname] = useState('');
-  
+
   // App State
   const [users, setUsers] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
@@ -52,7 +52,7 @@ export default function RoomPage() {
   const showToast = (message, type = 'system-join') => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => [...prev, { id, message, type }]);
-    
+
     // Auto remove after 3s
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
@@ -71,7 +71,7 @@ export default function RoomPage() {
     const initEditorAndWS = () => {
       if (typeof window !== 'undefined' && window.CodeMirror) {
         clearInterval(checkInterval);
-        
+
         // Initialize CodeMirror
         editor = window.CodeMirror.fromTextArea(document.getElementById('code-editor'), {
           lineNumbers: true,
@@ -118,9 +118,9 @@ export default function RoomPage() {
                 isRemoteChangeRef.current = true;
                 const cursor = editor.getCursor();
                 const scrollInfo = editor.getScrollInfo();
-                
+
                 editor.setValue(data.code);
-                
+
                 editor.setCursor(cursor);
                 editor.scrollTo(scrollInfo.left, scrollInfo.top);
                 isRemoteChangeRef.current = false;
@@ -136,7 +136,7 @@ export default function RoomPage() {
               case 'user-left': {
                 showToast(`🚪 ${data.userName} left the studio.`, 'leave');
                 setUsers(data.users);
-                
+
                 // Clear their cursor bookmark
                 if (remoteCursorsRef.current.has(data.userId)) {
                   remoteCursorsRef.current.get(data.userId).clear();
@@ -223,7 +223,7 @@ export default function RoomPage() {
   // Update Remote User Cursor
   function updateRemoteCursor(editor, userId, cursor, color, name) {
     const cursorsMap = remoteCursorsRef.current;
-    
+
     // Clear old bookmark
     if (cursorsMap.has(userId)) {
       cursorsMap.get(userId).clear();
@@ -234,7 +234,7 @@ export default function RoomPage() {
       const cursorEl = document.createElement('span');
       cursorEl.className = 'remote-cursor';
       cursorEl.style.borderLeft = `2px solid ${color}`;
-      
+
       const labelEl = document.createElement('span');
       labelEl.className = 'remote-cursor-label';
       labelEl.style.backgroundColor = color;
@@ -300,7 +300,7 @@ export default function RoomPage() {
           <a href="/" className="logo-link">
             <div className="logo" style={{ fontSize: '1.4rem' }}>
               <span className="logo-bracket">&lt;</span>
-              <span className="logo-text">CodeSync</span>
+              <span className="logo-text">HiveCode</span>
               <span className="logo-bracket">/&gt;</span>
             </div>
           </a>
@@ -358,9 +358,9 @@ export default function RoomPage() {
               ))}
             </div>
             <div className="chat-input-area">
-              <input 
-                type="text" 
-                placeholder="Type a message..." 
+              <input
+                type="text"
+                placeholder="Type a message..."
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyPress={(e) => {
@@ -380,10 +380,10 @@ export default function RoomPage() {
         <div className="modal-content glass-card">
           <h3>Enter Nickname</h3>
           <p>Please choose a nickname to join this room.</p>
-          <input 
-            type="text" 
-            id="modal-nickname" 
-            placeholder="e.g. CodeStar" 
+          <input
+            type="text"
+            id="modal-nickname"
+            placeholder="e.g. CodeStar"
             maxLength={15}
             value={modalNickname}
             onChange={(e) => setModalNickname(e.target.value)}

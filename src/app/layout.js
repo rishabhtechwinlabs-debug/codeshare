@@ -2,32 +2,32 @@ import "./globals.css";
 import Script from "next/script";
 
 export const metadata = {
-  metadataBase: new URL('https://codesync-k9ka.onrender.com'),
+  metadataBase: new URL('https://hivecode-k9ka.onrender.com'),
   title: {
-    default: "CodeSync - Real-time Collaborative Code Sharing",
-    template: "%s | CodeSync"
+    default: "HiveCode - Real-time Collaborative Code Sharing",
+    template: "%s | HiveCode"
   },
   description: "Collaborate, edit, and share code with anyone, anywhere in real-time. Fast, secure, and built for developers with raw WebSockets presence tracking.",
-  keywords: ["CodeSync", "collaborative coding", "real-time editor", "online code editor", "share code", "pair programming", "collaborative text editor", "websockets", "nextjs", "render"],
-  authors: [{ name: "CodeSync Team" }],
-  creator: "CodeSync",
-  publisher: "CodeSync",
+  keywords: ["HiveCode", "collaborative coding", "real-time editor", "online code editor", "share code", "pair programming", "collaborative text editor", "websockets", "nextjs", "render"],
+  authors: [{ name: "HiveCode Team" }],
+  creator: "HiveCode",
+  publisher: "HiveCode",
   alternates: {
     canonical: '/',
   },
   openGraph: {
-    title: 'CodeSync - Real-time Collaborative Code Sharing',
+    title: 'HiveCode - Real-time Collaborative Code Sharing',
     description: 'Collaborate, edit, and share code with anyone, anywhere in real-time. Fast, secure, and built for developers.',
-    url: 'https://codesync-k9ka.onrender.com',
-    siteName: 'CodeSync',
+    url: 'https://hivecode-k9ka.onrender.com',
+    siteName: 'HiveCode',
     locale: 'en_US',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'CodeSync - Real-time Collaborative Code Sharing',
+    title: 'HiveCode - Real-time Collaborative Code Sharing',
     description: 'Collaborate, edit, and share code with anyone, anywhere in real-time.',
-    creator: '@codesync',
+    creator: '@hivecode',
   },
   robots: {
     index: true,
@@ -48,8 +48,8 @@ export default function RootLayout({ children }) {
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
-    'name': 'CodeSync',
-    'url': 'https://codesync-k9ka.onrender.com',
+    'name': 'HiveCode',
+    'url': 'https://hivecode-k9ka.onrender.com',
     'applicationCategory': 'DeveloperApplication',
     'operatingSystem': 'All',
     'description': 'Collaborate, edit, and share code with anyone, anywhere in real-time with raw WebSockets presence tracking.',
@@ -67,7 +67,7 @@ export default function RootLayout({ children }) {
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-        
+
         {/* CodeMirror styles */}
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" />
@@ -82,9 +82,9 @@ export default function RootLayout({ children }) {
         {children}
 
         {/* CodeMirror Scripts */}
-        <Script 
-          src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" 
-          strategy="beforeInteractive" 
+        <Script
+          src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"
+          strategy="beforeInteractive"
         />
       </body>
     </html>

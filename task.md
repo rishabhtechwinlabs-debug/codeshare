@@ -1,4 +1,4 @@
-# CodeSync Next.js Migration Tasks
+# HiveCode Next.js Migration Tasks
 
 - [x] Scaffolding Next.js App
   - [x] Stop old server

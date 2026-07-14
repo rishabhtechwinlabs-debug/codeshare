@@ -85,12 +85,12 @@ export default function LandingPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', justifyContent: 'center', alignItems: 'center' }}>
       <div className="glow-bg"></div>
-      
+
       <main className="landing-container">
         <header className="logo-area">
           <div className="logo">
             <span className="logo-bracket">&lt;</span>
-            <span className="logo-text">CodeSync</span>
+            <span className="logo-text">HiveCode</span>
             <span className="logo-bracket">/&gt;</span>
           </div>
           <p className="tagline">Collaborate, edit, and share code with anyone, anywhere in real-time.</p>
@@ -98,7 +98,7 @@ export default function LandingPage() {
 
         <div className="glass-card">
           <div className="card-header">
-            <h2>Enter CodeSync Studio</h2>
+            <h2>Enter HiveCode Studio</h2>
             <p>Choose your username and start coding together.</p>
           </div>
 
@@ -106,11 +106,11 @@ export default function LandingPage() {
             <label htmlFor="nickname">Your Nickname</label>
             <div className="input-wrapper">
               <span className="input-icon">👤</span>
-              <input 
-                type="text" 
-                id="nickname" 
-                placeholder="e.g. CaptainCoder" 
-                maxLength={15} 
+              <input
+                type="text"
+                id="nickname"
+                placeholder="e.g. CaptainCoder"
+                maxLength={15}
                 autoComplete="off"
                 value={nickname}
                 onChange={(e) => {
@@ -148,10 +148,10 @@ export default function LandingPage() {
           <div className="join-area">
             <div className="input-wrapper">
               <span className="input-icon">🔗</span>
-              <input 
-                type="text" 
-                id="room-id" 
-                placeholder="Enter Room ID or link" 
+              <input
+                type="text"
+                id="room-id"
+                placeholder="Enter Room ID or link"
                 autoComplete="off"
                 value={roomIdInput}
                 onChange={(e) => {
@@ -191,7 +191,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="footer">
-        <p>CodeSync © 2026. Made with ❤️ for developers.</p>
+        <p>HiveCode © 2026. Made with ❤️ for developers.</p>
       </footer>
     </div>
   );

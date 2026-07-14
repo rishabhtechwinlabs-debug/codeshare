@@ -5,6 +5,6 @@ export default function robots() {
       allow: '/',
       disallow: [],
     },
-    sitemap: 'https://codesync-k9ka.onrender.com/sitemap.xml',
+    sitemap: 'https://hivecode-k9ka.onrender.com/sitemap.xml',
   }
 }

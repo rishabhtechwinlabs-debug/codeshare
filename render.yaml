@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: codesync
+    name: hivecode
     env: node
     plan: free
     buildCommand: npm install && npm run build
