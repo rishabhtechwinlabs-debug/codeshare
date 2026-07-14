@@ -6,12 +6,18 @@ import { useParams, useRouter } from 'next/navigation';
 const EMOJIS = ['😀', '😂', '😍', '👍', '🎉', '🔥', '❤️', '👏', '🚀', '💡', '😢', '😮', '🤔', '🙌', '👀', '💯', '✨', '⚡', '💻', '🎨'];
 
 const DEFAULT_DEVELOPER_GIFS = [
-  { title: "Typing Fast", url: "https://media.giphy.com/media/13HgwGsXF0aiGY/giphy.gif" },
-  { title: "It Works!", url: "https://media.giphy.com/media/3o7TKSjRrfIPjei1nG/giphy.gif" },
-  { title: "No Idea", url: "https://media.giphy.com/media/aYhXeLUkgXPA4/giphy.gif" },
-  { title: "Facepalm", url: "https://media.giphy.com/media/3xz2BLBOKhb9sT5Rf2/giphy.gif" },
-  { title: "Celebrating", url: "https://media.giphy.com/media/26tPplGWjC0YSLoM8/giphy.gif" },
-  { title: "Debugging", url: "https://media.giphy.com/media/l3d5R8459fTC09e0M/giphy.gif" }
+  { title: "Welcome / Hello", url: "https://user-images.githubusercontent.com/74038190/213866269-5d00981c-7c98-46d7-8a8e-16f462f15227.gif" },
+  { title: "HTML Code Animation", url: "https://user-images.githubusercontent.com/74038190/212257454-16e3712e-945a-4ca2-b238-408ad0bf87e6.gif" },
+  { title: "CSS Styles Animation", url: "https://user-images.githubusercontent.com/74038190/212257472-08e52665-c503-4bd9-aa20-f5a4dae769b5.gif" },
+  { title: "JS Script Animation", url: "https://user-images.githubusercontent.com/74038190/212257468-1e9a91f1-b626-4baa-b15d-5c385dfa7ed2.gif" },
+  { title: "React Components", url: "https://user-images.githubusercontent.com/74038190/212257465-7ce8d493-cac5-494e-982a-5a9deb852c4b.gif" },
+  { title: "Coding Octocat", url: "https://user-images.githubusercontent.com/74038190/212741999-016fddbd-617a-4448-8042-0ecf907aea25.gif" },
+  { title: "Python Scripting", url: "https://user-images.githubusercontent.com/74038190/212281756-450d3ffa-9335-4b98-a965-db8a18fee927.gif" },
+  { title: "Typescript Dev", url: "https://user-images.githubusercontent.com/74038190/212280805-9bcb336b-8c55-46a8-abf8-ff286ab55472.gif" },
+  { title: "Docker Devops", url: "https://user-images.githubusercontent.com/74038190/212280823-79088828-a258-4a4d-8d6c-96315d5a07af.gif" },
+  { title: "Git Version Control", url: "https://user-images.githubusercontent.com/74038190/212281763-e6ecd7ef-c4aa-45b6-a97c-f33f6bb592bd.gif" },
+  { title: "Node JS Backend", url: "https://user-images.githubusercontent.com/74038190/212281775-b468df30-4edc-4bf8-a4ee-f52e1aaddc86.gif" },
+  { title: "Database Schema", url: "https://user-images.githubusercontent.com/74038190/212281780-0afd9616-8310-46e9-a898-c4f5269f1387.gif" }
 ];
 
 export default function RoomPage() {
@@ -50,6 +56,8 @@ export default function RoomPage() {
   // Refs for tracking typing status
   const isTypingRef = useRef(false);
   const typingTimeoutRef = useRef(null);
+  const gifCacheRef = useRef({});
+  const gifDebounceTimeoutRef = useRef(null);
 
   // Refs for tracking mutable states inside listeners
   const editorRef = useRef(null);
@@ -277,6 +285,9 @@ export default function RoomPage() {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
+      if (gifDebounceTimeoutRef.current) {
+        clearTimeout(gifDebounceTimeoutRef.current);
+      }
       if (socket) {
         socket.onclose = null;
         socket.onerror = null;
@@ -376,28 +387,80 @@ export default function RoomPage() {
     }, 2000);
   };
 
-  const handleGifSearch = async (query) => {
-    setGifQuery(query);
-    if (!query.trim()) {
-      setGifs(DEFAULT_DEVELOPER_GIFS);
-      return;
-    }
+  const loadDefaultGifs = async () => {
     setLoadingGifs(true);
+    const apiKey = process.env.NEXT_PUBLIC_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
     try {
-      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=dc6zaTOxFJmzC&q=${encodeURIComponent(query)}&limit=6`);
+      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=coding&limit=6`);
       const result = await res.json();
-      if (result.data) {
+      if (result.data && result.data.length > 0) {
         setGifs(result.data.map(item => ({
           title: item.title,
           url: item.images.downsized_medium?.url || item.images.original?.url
         })));
+      } else {
+        setGifs(DEFAULT_DEVELOPER_GIFS);
       }
     } catch (e) {
-      console.error(e);
-      setGifs([]);
+      console.error('Error preloading default gifs:', e);
+      setGifs(DEFAULT_DEVELOPER_GIFS);
     } finally {
       setLoadingGifs(false);
     }
+  };
+
+  const handleGifSearch = (query) => {
+    setGifQuery(query);
+    
+    if (gifDebounceTimeoutRef.current) {
+      clearTimeout(gifDebounceTimeoutRef.current);
+    }
+
+    if (!query.trim()) {
+      loadDefaultGifs();
+      return;
+    }
+
+    // Debounce API requests by 500ms
+    gifDebounceTimeoutRef.current = setTimeout(async () => {
+      // Check client-side query cache first
+      const normalizedQuery = query.trim().toLowerCase();
+      if (gifCacheRef.current[normalizedQuery]) {
+        setGifs(gifCacheRef.current[normalizedQuery]);
+        return;
+      }
+
+      setLoadingGifs(true);
+      const apiKey = process.env.NEXT_PUBLIC_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
+      try {
+        const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=6`);
+        const result = await res.json();
+        if (result.data && result.data.length > 0) {
+          const formatted = result.data.map(item => ({
+            title: item.title,
+            url: item.images.downsized_medium?.url || item.images.original?.url
+          }));
+          
+          // Cache the formatted result set
+          gifCacheRef.current[normalizedQuery] = formatted;
+          setGifs(formatted);
+        } else {
+          // Fallback to client-side local search filtering
+          const filtered = DEFAULT_DEVELOPER_GIFS.filter(gif =>
+            gif.title.toLowerCase().includes(query.toLowerCase())
+          );
+          setGifs(filtered);
+        }
+      } catch (e) {
+        console.error('Error searching Giphy, falling back to local query filtering:', e);
+        const filtered = DEFAULT_DEVELOPER_GIFS.filter(gif =>
+          gif.title.toLowerCase().includes(query.toLowerCase())
+        );
+        setGifs(filtered);
+      } finally {
+        setLoadingGifs(false);
+      }
+    }, 500);
   };
 
   const handleSendGif = (url) => {
@@ -642,7 +705,7 @@ export default function RoomPage() {
 
               <div className="chat-input-area">
                 <button className="input-picker-btn emoji-btn" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} title="Add Emoji">😀</button>
-                <button className="input-picker-btn gif-btn" onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); if (!gifs.length) setGifs(DEFAULT_DEVELOPER_GIFS); }} title="Share GIF">GIF</button>
+                <button className="input-picker-btn gif-btn" onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); if (!gifs.length) loadDefaultGifs(); }} title="Share GIF">GIF</button>
                 
                 <input
                   type="text"
