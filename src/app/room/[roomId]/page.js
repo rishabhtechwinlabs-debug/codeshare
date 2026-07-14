@@ -45,6 +45,16 @@ export default function RoomPage() {
   const [gifs, setGifs] = useState([]);
   const [loadingGifs, setLoadingGifs] = useState(false);
 
+  // Activity Logs States
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [showLogsModal, setShowLogsModal] = useState(false);
+
+  // Sidebar Resizable States
+  const [sidebarWidth, setSidebarWidth] = useState(360);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartWidthRef = useRef(360);
+  const dragStartXRef = useRef(0);
+
   // Authentication & Room Lock States
   const [isAuthRequired, setIsAuthRequired] = useState(false);
   const [authError, setAuthError] = useState('');
@@ -97,6 +107,16 @@ export default function RoomPage() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3300);
+  };
+
+  // Activity Logging Helper
+  const addActivityLog = (text) => {
+    const newLog = {
+      id: Math.random().toString(36).substring(2, 9),
+      text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    };
+    setActivityLogs(prev => [newLog, ...prev]);
   };
 
   // Main Editor & Socket initialization
@@ -165,6 +185,7 @@ export default function RoomPage() {
                 if (authPassword) {
                   sessionStorage.setItem('room_pw_' + roomId, authPassword);
                 }
+                addActivityLog(`✨ Joined room "${roomId}" as "${nicknameRef.current}"`);
                 break;
               }
 
@@ -185,12 +206,14 @@ export default function RoomPage() {
               case 'user-joined': {
                 showToast(`👥 ${data.user.name} joined the studio!`, 'join');
                 setUsers(data.users);
+                addActivityLog(`👤 User "${data.user.name}" joined the studio`);
                 break;
               }
 
               case 'user-left': {
                 showToast(`🚪 ${data.userName} left the studio.`, 'leave');
                 setUsers(data.users);
+                addActivityLog(`🚪 User "${data.userName}" left the studio`);
 
                 // Clear their cursor bookmark
                 if (remoteCursorsRef.current.has(data.userId)) {
@@ -241,6 +264,7 @@ export default function RoomPage() {
                   setAuthPassword('');
                 }
                 showToast(data.isLocked ? '🔒 Room is now password protected!' : '🔓 Room is now unlocked!', 'join');
+                addActivityLog(data.isLocked ? '🔒 Password protection enabled for this room' : '🔓 Password protection disabled');
                 break;
               }
             }
@@ -367,6 +391,47 @@ export default function RoomPage() {
       sendTypingStop();
     }
   };
+
+  const handleResizerMouseDown = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartXRef.current = e.clientX;
+    dragStartWidthRef.current = sidebarWidth;
+    document.body.classList.add('resizing');
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e) => {
+      const deltaX = e.clientX - dragStartXRef.current;
+      const newWidth = dragStartWidthRef.current - deltaX;
+      
+      // Bounds: min 300px, max 650px
+      if (newWidth >= 300 && newWidth <= 650) {
+        setSidebarWidth(newWidth);
+        if (editorRef.current) {
+          editorRef.current.refresh();
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      document.body.classList.remove('resizing');
+      if (editorRef.current) {
+        editorRef.current.refresh();
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
 
   const handleReact = (messageId, emoji) => {
     if (!socketRef.current || socketRef.current.readyState !== 1) return;
@@ -497,7 +562,7 @@ export default function RoomPage() {
       type: 'chat-message',
       text: text,
       isGif: isGif,
-      replyTo: replyingTo ? { id: replyingTo.id, sender: replyingTo.sender, text: replyingTo.text } : null
+      replyTo: replyingTo ? { id: replyingTo.id, sender: replyingTo.sender, text: replyingTo.text, isGif: !!replyingTo.isGif } : null
     }));
 
     if (customText === null) {
@@ -590,6 +655,10 @@ export default function RoomPage() {
               <span>💬</span>
               <span className="btn-text">{isSidebarOpen ? ' Hide Chat' : ' Show Chat'}</span>
             </button>
+            <button className="header-btn log-toggle-btn" onClick={() => setShowLogsModal(true)} title="Activity Logs">
+              <span>📋</span>
+              <span className="btn-text"> Logs</span>
+            </button>
           </div>
         </div>
 
@@ -612,8 +681,22 @@ export default function RoomPage() {
           <textarea id="code-editor" style={{ display: 'none' }}></textarea>
         </div>
 
+        {/* Resizer Handle */}
+        {isSidebarOpen && (
+          <div 
+            className={`sidebar-resizer ${isDragging ? 'dragging' : ''}`} 
+            onMouseDown={handleResizerMouseDown}
+          />
+        )}
+
         {/* Sidebar Pane (Chat Only, Collapsible) */}
-        <div className={`pane sidebar-pane ${isSidebarOpen ? '' : 'collapsed'}`}>
+        <div 
+          className={`pane sidebar-pane ${isSidebarOpen ? '' : 'collapsed'} ${isDragging ? 'no-transition' : ''}`}
+          style={{ 
+            width: isSidebarOpen ? `${sidebarWidth}px` : undefined,
+            minWidth: isSidebarOpen ? `${sidebarWidth}px` : undefined
+          }}
+        >
           <div className="sidebar-tabs" style={{ display: 'flex', justifyContent: 'center', background: 'rgba(0, 0, 0, 0.2)', padding: '1rem', borderBottom: '1px solid var(--border-color)' }}>
             <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--primary-color)', letterSpacing: '0.05em' }}>💬 LIVE STUDIO CHAT</span>
           </div>
@@ -628,7 +711,16 @@ export default function RoomPage() {
                   {msg.replyTo && (
                     <div className="quoted-reply-box" onClick={() => scrollToMessage(msg.replyTo.id)}>
                       <div className="quoted-reply-sender">{msg.replyTo.sender}</div>
-                      <div className="quoted-reply-text">{msg.replyTo.text}</div>
+                      <div className="quoted-reply-text">
+                        {msg.replyTo.isGif ? (
+                          <div className="quoted-reply-gif-container">
+                            <img src={msg.replyTo.text} alt="Quoted GIF" className="quoted-reply-gif-img" />
+                            <span className="quoted-reply-gif-label">GIF</span>
+                          </div>
+                        ) : (
+                          msg.replyTo.text
+                        )}
+                      </div>
                     </div>
                   )}
                   
@@ -841,6 +933,38 @@ export default function RoomPage() {
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>Lock Room</button>
             </form>
           )}
+        </div>
+      </div>
+
+      {/* Activity Logs Modal */}
+      <div className={`modal ${showLogsModal ? 'open' : ''}`}>
+        <div className="modal-content glass-card activity-logs-modal" style={{ maxWidth: '480px' }}>
+          <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>📋 Activity Logs</h3>
+            <button className="close-picker-btn" onClick={() => setShowLogsModal(false)}>✕</button>
+          </div>
+          
+          <div className="logs-list-container" style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '1.25rem', paddingRight: '0.25rem' }}>
+            {activityLogs.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', padding: '2rem 0' }}>
+                No activity logged yet. Join and leave events will appear here in real-time.
+              </div>
+            ) : (
+              <div className="logs-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                {activityLogs.map((log) => (
+                  <div key={log.id} className="log-item" style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', display: 'flex', gap: '0.6rem', borderLeft: '3px solid var(--primary-color)' }}>
+                    <span className="log-time" style={{ color: 'var(--primary-color)', opacity: 0.8, fontWeight: 700 }}>{log.time}</span>
+                    <span className="log-text" style={{ color: '#fff' }}>{log.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button className="btn btn-secondary" onClick={() => setActivityLogs([])} style={{ flex: 1 }}>Clear Logs</button>
+            <button className="btn btn-primary" onClick={() => setShowLogsModal(false)} style={{ flex: 1 }}>Close</button>
+          </div>
         </div>
       </div>
 

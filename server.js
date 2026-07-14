@@ -85,7 +85,7 @@ app.prepare().then(() => {
 
             if (!rooms.has(roomId)) {
               rooms.set(roomId, {
-                code: '// Welcome to CodeSync! Share this URL with others to collaborate.\n',
+                code: '// Welcome to HiveCode! Share this URL with others to collaborate.\n',
                 users: new Map(),
                 messages: [],        // Keeps last 100 messages
                 typingUsers: new Map(), // userId -> name
@@ -185,7 +185,7 @@ app.prepare().then(() => {
                   reactions: {},
                   time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 };
-                
+
                 room.messages.push(messageObj);
                 if (room.messages.length > 100) {
                   room.messages.shift();
@@ -215,7 +215,7 @@ app.prepare().then(() => {
                   if (!msgObj.reactions[emoji]) {
                     msgObj.reactions[emoji] = [];
                   }
-                  
+
                   const index = msgObj.reactions[emoji].indexOf(user.name);
                   if (index > -1) {
                     msgObj.reactions[emoji].splice(index, 1);
@@ -225,7 +225,7 @@ app.prepare().then(() => {
                   } else {
                     msgObj.reactions[emoji].push(user.name);
                   }
-                  
+
                   broadcastToRoom(currentRoomId, {
                     type: 'chat-reaction-update',
                     messageId: messageId,
