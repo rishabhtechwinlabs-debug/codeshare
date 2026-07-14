@@ -9,6 +9,22 @@ export default function LandingPage() {
   const [roomIdInput, setRoomIdInput] = useState('');
   const [nicknameError, setNicknameError] = useState('');
   const [roomError, setRoomError] = useState('');
+  const [activeRooms, setActiveRooms] = useState([]);
+  const [loadingRooms, setLoadingRooms] = useState(true);
+
+  const fetchActiveRooms = async () => {
+    try {
+      const res = await fetch('/api/rooms');
+      const data = await res.json();
+      if (data && data.rooms) {
+        setActiveRooms(data.rooms);
+      }
+    } catch (e) {
+      console.error('Error fetching rooms:', e);
+    } finally {
+      setLoadingRooms(false);
+    }
+  };
 
   useEffect(() => {
     // Load saved nickname if exists
@@ -16,6 +32,10 @@ export default function LandingPage() {
     if (savedName) {
       setNickname(savedName);
     }
+
+    fetchActiveRooms();
+    const interval = setInterval(fetchActiveRooms, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   function generateRoomId() {
@@ -96,79 +116,129 @@ export default function LandingPage() {
           <p className="tagline">Collaborate, edit, and share code with anyone, anywhere in real-time.</p>
         </header>
 
-        <div className="glass-card">
-          <div className="card-header">
-            <h2>Enter HiveCode Studio</h2>
-            <p>Choose your username and start coding together.</p>
-          </div>
+        <div className="landing-grid">
+          {/* Join / Create Card */}
+          <div className="glass-card form-card">
+            <div className="card-header">
+              <h2>Enter HiveCode Studio</h2>
+              <p>Choose your username and start coding together.</p>
+            </div>
 
-          <div className="form-group">
-            <label htmlFor="nickname">Your Nickname</label>
-            <div className="input-wrapper">
-              <span className="input-icon">👤</span>
-              <input
-                type="text"
-                id="nickname"
-                placeholder="e.g. CaptainCoder"
-                maxLength={15}
-                autoComplete="off"
-                value={nickname}
-                onChange={(e) => {
-                  setNickname(e.target.value);
-                  if (e.target.value.trim()) setNicknameError('');
-                }}
-                className={nicknameError ? 'error' : ''}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    if (roomIdInput.trim()) {
-                      handleJoinRoom();
-                    } else {
-                      handleCreateRoom();
+            <div className="form-group">
+              <label htmlFor="nickname">Your Nickname</label>
+              <div className="input-wrapper">
+                <span className="input-icon">👤</span>
+                <input
+                  type="text"
+                  id="nickname"
+                  placeholder="e.g. CaptainCoder"
+                  maxLength={15}
+                  autoComplete="off"
+                  value={nickname}
+                  onChange={(e) => {
+                    setNickname(e.target.value);
+                    if (e.target.value.trim()) setNicknameError('');
+                  }}
+                  className={nicknameError ? 'error' : ''}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      if (roomIdInput.trim()) {
+                        handleJoinRoom();
+                      } else {
+                        handleCreateRoom();
+                      }
                     }
-                  }
-                }}
-              />
+                  }}
+                />
+              </div>
+              {nicknameError && <span className="error-message">{nicknameError}</span>}
             </div>
-            {nicknameError && <span className="error-message">{nicknameError}</span>}
-          </div>
 
-          <div className="action-divider">
-            <span>Create a New Room</span>
-          </div>
-
-          <button id="create-room-btn" className="btn btn-primary" onClick={handleCreateRoom}>
-            <span>Create Studio Room</span>
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-          </button>
-
-          <div className="action-divider">
-            <span>Or Join Existing Room</span>
-          </div>
-
-          <div className="join-area">
-            <div className="input-wrapper">
-              <span className="input-icon">🔗</span>
-              <input
-                type="text"
-                id="room-id"
-                placeholder="Enter Room ID or link"
-                autoComplete="off"
-                value={roomIdInput}
-                onChange={(e) => {
-                  setRoomIdInput(e.target.value);
-                  if (e.target.value.trim()) setRoomError('');
-                }}
-                className={roomError ? 'error' : ''}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleJoinRoom();
-                  }
-                }}
-              />
+            <div className="action-divider">
+              <span>Create a New Room</span>
             </div>
-            <button id="join-room-btn" className="btn btn-secondary" onClick={handleJoinRoom}>Join</button>
+
+            <button id="create-room-btn" className="btn btn-primary" onClick={handleCreateRoom}>
+              <span>Create Studio Room</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+
+            <div className="action-divider">
+              <span>Or Join Existing Room</span>
+            </div>
+
+            <div className="join-area">
+              <div className="input-wrapper">
+                <span className="input-icon">🔗</span>
+                <input
+                  type="text"
+                  id="room-id"
+                  placeholder="Enter Room ID or link"
+                  autoComplete="off"
+                  value={roomIdInput}
+                  onChange={(e) => {
+                    setRoomIdInput(e.target.value);
+                    if (e.target.value.trim()) setRoomError('');
+                  }}
+                  className={roomError ? 'error' : ''}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleJoinRoom();
+                    }
+                  }}
+                />
+              </div>
+              <button id="join-room-btn" className="btn btn-secondary" onClick={handleJoinRoom}>Join</button>
+            </div>
+            {roomError && <span className="error-message">{roomError}</span>}
           </div>
-          {roomError && <span className="error-message">{roomError}</span>}
+
+          {/* Active Rooms list */}
+          <div className="glass-card active-rooms-card active-studios-card">
+            <div className="card-header active-studios-header">
+              <div>
+                <h2>Active Studios</h2>
+                <p>Join an ongoing live collaboration room instantly.</p>
+              </div>
+              <button className="refresh-btn" onClick={fetchActiveRooms} title="Refresh Room List">🔄 Refresh</button>
+            </div>
+
+            {loadingRooms ? (
+              <div className="dashboard-status">
+                <div className="spinner"></div>
+                <span>Scanning active studios...</span>
+              </div>
+            ) : activeRooms.length === 0 ? (
+              <div className="dashboard-empty">
+                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🏢</div>
+                <h3>No active studios right now</h3>
+                <p>Create a studio room on the left to start collaborating!</p>
+              </div>
+            ) : (
+              <div className="studios-list-scroll">
+                {activeRooms.map(room => (
+                  <div 
+                    key={room.id} 
+                    className="studio-list-item"
+                    onClick={() => {
+                      const validName = validateNickname();
+                      if (!validName) return;
+                      router.push(`/room/${room.id}`);
+                    }}
+                  >
+                    <div className="studio-info-meta">
+                      <span className="studio-id-tag">#{room.id}</span>
+                      {room.isLocked && <span className="lock-icon-tag" title="Password Protected">🔒 Locked</span>}
+                    </div>
+                    <div className="studio-join-indicator">
+                      <span className="user-count-tag">👥 {room.userCount} active</span>
+                      <span className="join-action-text">Join Studio →</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <section className="features">

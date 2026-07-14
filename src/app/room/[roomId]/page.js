@@ -3,6 +3,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
+const EMOJIS = ['😀', '😂', '😍', '👍', '🎉', '🔥', '❤️', '👏', '🚀', '💡', '😢', '😮', '🤔', '🙌', '👀', '💯', '✨', '⚡', '💻', '🎨'];
+
+const DEFAULT_DEVELOPER_GIFS = [
+  { title: "Typing Fast", url: "https://media.giphy.com/media/13HgwGsXF0aiGY/giphy.gif" },
+  { title: "It Works!", url: "https://media.giphy.com/media/3o7TKSjRrfIPjei1nG/giphy.gif" },
+  { title: "No Idea", url: "https://media.giphy.com/media/aYhXeLUkgXPA4/giphy.gif" },
+  { title: "Facepalm", url: "https://media.giphy.com/media/3xz2BLBOKhb9sT5Rf2/giphy.gif" },
+  { title: "Celebrating", url: "https://media.giphy.com/media/26tPplGWjC0YSLoM8/giphy.gif" },
+  { title: "Debugging", url: "https://media.giphy.com/media/l3d5R8459fTC09e0M/giphy.gif" }
+];
+
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
@@ -18,6 +29,27 @@ export default function RoomPage() {
   const [chatInput, setChatInput] = useState('');
   const [toasts, setToasts] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // Chat Advanced States
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [gifQuery, setGifQuery] = useState('');
+  const [gifs, setGifs] = useState([]);
+  const [loadingGifs, setLoadingGifs] = useState(false);
+
+  // Authentication & Room Lock States
+  const [isAuthRequired, setIsAuthRequired] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isRoomLocked, setIsRoomLocked] = useState(false);
+  const [showLockModal, setShowLockModal] = useState(false);
+  const [newRoomPassword, setNewRoomPassword] = useState('');
+
+  // Refs for tracking typing status
+  const isTypingRef = useRef(false);
+  const typingTimeoutRef = useRef(null);
 
   // Refs for tracking mutable states inside listeners
   const editorRef = useRef(null);
@@ -91,10 +123,12 @@ export default function RoomPage() {
         socketRef.current = socket;
 
         socket.onopen = () => {
+          const savedPw = sessionStorage.getItem('room_pw_' + roomId) || '';
           socket.send(JSON.stringify({
             type: 'join',
             roomId: roomId,
-            nickname: nickname
+            nickname: nickname,
+            password: savedPw
           }));
         };
 
@@ -110,6 +144,19 @@ export default function RoomPage() {
                 isRemoteChangeRef.current = false;
 
                 setUsers(data.users);
+                if (data.messages) {
+                  setChatMessages(data.messages);
+                }
+                if (data.typingUsers) {
+                  setTypingUsers(data.typingUsers.filter(u => u.id !== data.userId));
+                }
+                
+                setIsAuthRequired(false);
+                setAuthError('');
+                setIsRoomLocked(!!data.isLocked);
+                if (authPassword) {
+                  sessionStorage.setItem('room_pw_' + roomId, authPassword);
+                }
                 break;
               }
 
@@ -152,12 +199,40 @@ export default function RoomPage() {
               }
 
               case 'chat-message': {
-                setChatMessages(prev => [...prev, {
-                  sender: data.sender,
-                  text: data.text,
-                  color: data.color,
-                  time: data.time
-                }]);
+                setChatMessages(prev => [...prev, data.message]);
+                break;
+              }
+
+              case 'chat-reaction-update': {
+                setChatMessages(prev => prev.map(msg => {
+                  if (msg.id === data.messageId) {
+                    return { ...msg, reactions: data.reactions };
+                  }
+                  return msg;
+                }));
+                break;
+              }
+
+              case 'typing-update': {
+                setTypingUsers(data.typingUsers.filter(u => u.id !== myUserIdRef.current));
+                break;
+              }
+
+              case 'auth-required': {
+                setIsAuthRequired(true);
+                if (data.error) {
+                  setAuthError(data.error);
+                }
+                break;
+              }
+
+              case 'room-lock-status': {
+                setIsRoomLocked(data.isLocked);
+                if (!data.isLocked) {
+                  sessionStorage.removeItem('room_pw_' + roomId);
+                  setAuthPassword('');
+                }
+                showToast(data.isLocked ? '🔒 Room is now password protected!' : '🔓 Room is now unlocked!', 'join');
                 break;
               }
             }
@@ -199,6 +274,9 @@ export default function RoomPage() {
     return () => {
       clearInterval(checkInterval);
       clearTimeout(reconnectTimeout);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
       if (socket) {
         socket.onclose = null;
         socket.onerror = null;
@@ -251,6 +329,91 @@ export default function RoomPage() {
     }
   }
 
+  // Typing state control
+  const sendTypingStart = () => {
+    if (!isTypingRef.current && socketRef.current && socketRef.current.readyState === 1) {
+      isTypingRef.current = true;
+      socketRef.current.send(JSON.stringify({ type: 'typing-start' }));
+    }
+  };
+
+  const sendTypingStop = () => {
+    if (isTypingRef.current && socketRef.current && socketRef.current.readyState === 1) {
+      isTypingRef.current = false;
+      socketRef.current.send(JSON.stringify({ type: 'typing-stop' }));
+    }
+  };
+
+  const handleChatInputChange = (e) => {
+    setChatInput(e.target.value);
+    if (e.target.value.trim().length > 0) {
+      sendTypingStart();
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        sendTypingStop();
+      }, 2000);
+    } else {
+      sendTypingStop();
+    }
+  };
+
+  const handleReact = (messageId, emoji) => {
+    if (!socketRef.current || socketRef.current.readyState !== 1) return;
+    socketRef.current.send(JSON.stringify({
+      type: 'chat-reaction',
+      messageId,
+      emoji
+    }));
+  };
+
+  const handleEmojiClick = (emoji) => {
+    setChatInput(prev => prev + emoji);
+    setShowEmojiPicker(false);
+    sendTypingStart();
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      sendTypingStop();
+    }, 2000);
+  };
+
+  const handleGifSearch = async (query) => {
+    setGifQuery(query);
+    if (!query.trim()) {
+      setGifs(DEFAULT_DEVELOPER_GIFS);
+      return;
+    }
+    setLoadingGifs(true);
+    try {
+      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=dc6zaTOxFJmzC&q=${encodeURIComponent(query)}&limit=6`);
+      const result = await res.json();
+      if (result.data) {
+        setGifs(result.data.map(item => ({
+          title: item.title,
+          url: item.images.downsized_medium?.url || item.images.original?.url
+        })));
+      }
+    } catch (e) {
+      console.error(e);
+      setGifs([]);
+    } finally {
+      setLoadingGifs(false);
+    }
+  };
+
+  const handleSendGif = (url) => {
+    handleSendChat(url, true);
+    setShowGifPicker(false);
+  };
+
+  const scrollToMessage = (msgId) => {
+    const el = document.getElementById(`chat-msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('highlight-flash');
+      setTimeout(() => el.classList.remove('highlight-flash'), 1500);
+    }
+  };
+
   // Clipboard Copier
   const handleShare = () => {
     const shareUrl = window.location.href;
@@ -262,15 +425,61 @@ export default function RoomPage() {
   };
 
   // Send Messages inside Chat
-  const handleSendChat = () => {
-    const text = chatInput.trim();
-    if (!text || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+  const handleSendChat = (customText = null, isGif = false) => {
+    const textObj = customText !== null ? customText : chatInput;
+    const text = typeof textObj === 'string' ? textObj.trim() : '';
+    if (!text || !socketRef.current || socketRef.current.readyState !== 1) return;
 
     socketRef.current.send(JSON.stringify({
       type: 'chat-message',
-      text: text
+      text: text,
+      isGif: isGif,
+      replyTo: replyingTo ? { id: replyingTo.id, sender: replyingTo.sender, text: replyingTo.text } : null
     }));
-    setChatInput('');
+
+    if (customText === null) {
+      setChatInput('');
+    }
+    setReplyingTo(null);
+    sendTypingStop();
+  };
+
+  const handleAuthSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (!authPassword.trim()) return;
+
+    if (socketRef.current && socketRef.current.readyState === 1) {
+      socketRef.current.send(JSON.stringify({
+        type: 'join',
+        roomId: roomId,
+        nickname: nickname,
+        password: authPassword
+      }));
+    }
+  };
+
+  const handleSetLockSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (!newRoomPassword.trim()) return;
+
+    if (socketRef.current && socketRef.current.readyState === 1) {
+      socketRef.current.send(JSON.stringify({
+        type: 'set-room-password',
+        password: newRoomPassword
+      }));
+    }
+    sessionStorage.setItem('room_pw_' + roomId, newRoomPassword);
+    setNewRoomPassword('');
+    setShowLockModal(false);
+  };
+
+  const handleRemoveLock = () => {
+    if (socketRef.current && socketRef.current.readyState === 1) {
+      socketRef.current.send(JSON.stringify({
+        type: 'remove-room-password'
+      }));
+    }
+    setShowLockModal(false);
   };
 
   // Submit Modal Nickname Form
@@ -311,6 +520,9 @@ export default function RoomPage() {
               <span className="btn-text">Share Link</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
+            <button className={`header-btn lock-btn ${isRoomLocked ? 'locked' : ''}`} onClick={() => setShowLockModal(true)} title={isRoomLocked ? "Room is Password Protected" : "Set Password"}>
+              <span>{isRoomLocked ? '🔒 Locked' : '🔓 Unlocked'}</span>
+            </button>
             <button className="header-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)} title={isSidebarOpen ? "Hide Chat" : "Show Chat"}>
               <span>💬</span>
               <span className="btn-text">{isSidebarOpen ? ' Hide Chat' : ' Show Chat'}</span>
@@ -343,35 +555,160 @@ export default function RoomPage() {
             <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--primary-color)', letterSpacing: '0.05em' }}>💬 LIVE STUDIO CHAT</span>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', position: 'relative' }}>
             <div className="chat-messages">
               <div className="chat-bubble system">
                 Welcome to the room chat! Messages here are shared with everyone in the room.
               </div>
               {chatMessages.map((msg, index) => (
-                <div key={index} className={`chat-bubble ${msg.sender === nickname ? 'me' : ''}`}>
+                <div key={msg.id || index} id={`chat-msg-${msg.id}`} className={`chat-bubble ${msg.sender === nickname ? 'me' : ''}`}>
+                  {msg.replyTo && (
+                    <div className="quoted-reply-box" onClick={() => scrollToMessage(msg.replyTo.id)}>
+                      <div className="quoted-reply-sender">{msg.replyTo.sender}</div>
+                      <div className="quoted-reply-text">{msg.replyTo.text}</div>
+                    </div>
+                  )}
+                  
                   <div className="bubble-meta">
                     <span style={{ color: msg.color }}>{msg.sender}</span>
                     <span>{msg.time}</span>
                   </div>
-                  <div>{msg.text}</div>
+
+                  {msg.isGif ? (
+                    <img src={msg.text} alt="gif" className="chat-gif-img" />
+                  ) : (
+                    <div className="chat-msg-text">{msg.text}</div>
+                  )}
+
+                  {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                    <div className="message-reactions-badges">
+                      {Object.entries(msg.reactions).map(([emoji, usersWhoReacted]) => {
+                        const hasMyReaction = usersWhoReacted.includes(nickname);
+                        return (
+                          <button 
+                            key={emoji} 
+                            className={`reaction-badge ${hasMyReaction ? 'active' : ''}`}
+                            onClick={() => handleReact(msg.id, emoji)}
+                            title={usersWhoReacted.join(', ')}
+                          >
+                            <span>{emoji}</span>
+                            <span className="reaction-count">{usersWhoReacted.length}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {msg.id && (
+                    <div className="message-hover-actions">
+                      <div className="reactions-quick-bar">
+                        {['👍', '❤️', '😂', '🎉', '😢', '😮'].map(emoji => (
+                          <button key={emoji} onClick={() => handleReact(msg.id, emoji)}>{emoji}</button>
+                        ))}
+                      </div>
+                      <button className="reply-action-btn" onClick={() => setReplyingTo(msg)} title="Reply">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 17H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-5l-5 5v-5z"></path></svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
-            <div className="chat-input-area">
-              <input
-                type="text"
-                placeholder="Type a message..."
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') handleSendChat();
-                }}
-              />
-              <button onClick={handleSendChat}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-              </button>
+
+            {typingUsers.length > 0 && (
+              <div className="typing-indicator-container">
+                <div className="typing-indicator-dots">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <span className="typing-text">
+                  {typingUsers.map(u => u.name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                </span>
+              </div>
+            )}
+
+            <div className="chat-input-wrapper">
+              {replyingTo && (
+                <div className="replying-to-preview">
+                  <div className="preview-left">
+                    <span className="reply-label">Replying to:</span>
+                    <span className="reply-sender">{replyingTo.sender}</span>
+                    <span className="reply-text-snippet">{replyingTo.isGif ? '[GIF]' : replyingTo.text}</span>
+                  </div>
+                  <button className="cancel-reply-btn" onClick={() => setReplyingTo(null)}>✕</button>
+                </div>
+              )}
+
+              <div className="chat-input-area">
+                <button className="input-picker-btn emoji-btn" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} title="Add Emoji">😀</button>
+                <button className="input-picker-btn gif-btn" onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); if (!gifs.length) setGifs(DEFAULT_DEVELOPER_GIFS); }} title="Share GIF">GIF</button>
+                
+                <input
+                  type="text"
+                  placeholder="Type a message..."
+                  value={chatInput}
+                  onChange={handleChatInputChange}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') handleSendChat();
+                  }}
+                  onBlur={() => {
+                    setTimeout(sendTypingStop, 500);
+                  }}
+                />
+                <button className="send-msg-btn" onClick={() => handleSendChat()}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </button>
+              </div>
             </div>
+
+            {/* Emojis Selector Overlay */}
+            {showEmojiPicker && (
+              <div className="emoji-picker-panel glass-card">
+                <div className="picker-header">
+                  <span>Emojis</span>
+                  <button className="close-picker-btn" onClick={() => setShowEmojiPicker(false)}>✕</button>
+                </div>
+                <div className="emojis-grid">
+                  {EMOJIS.map(emoji => (
+                    <button key={emoji} className="emoji-item" onClick={() => handleEmojiClick(emoji)}>{emoji}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* GIFs Search Overlay */}
+            {showGifPicker && (
+              <div className="gif-picker-panel glass-card">
+                <div className="picker-header">
+                  <span>Select a GIF</span>
+                  <button className="close-picker-btn" onClick={() => setShowGifPicker(false)}>✕</button>
+                </div>
+                <div className="gif-search-wrapper">
+                  <input 
+                    type="text" 
+                    placeholder="Search Giphy..." 
+                    value={gifQuery}
+                    onChange={(e) => handleGifSearch(e.target.value)}
+                  />
+                </div>
+                <div className="gifs-grid-container">
+                  {loadingGifs ? (
+                    <div className="gifs-loading">Searching...</div>
+                  ) : gifs.length === 0 ? (
+                    <div className="gifs-no-results">No GIFs found</div>
+                  ) : (
+                    <div className="gifs-grid">
+                      {gifs.map((gif, index) => (
+                        <div key={index} className="gif-grid-item" onClick={() => handleSendGif(gif.url)}>
+                          <img src={gif.url} alt={gif.title || "gif"} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -393,6 +730,54 @@ export default function RoomPage() {
             }}
           />
           <button className="btn btn-primary" onClick={handleModalSubmit}>Join Room</button>
+        </div>
+      </div>
+
+      {/* Password Authentication Modal */}
+      <div className={`modal ${isAuthRequired ? 'open' : ''}`}>
+        <form className="modal-content glass-card" onSubmit={handleAuthSubmit}>
+          <h3>🔒 Password Required</h3>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>This room is locked. Please enter the password to join.</p>
+          <input
+            type="password"
+            placeholder="Room Password"
+            value={authPassword}
+            onChange={(e) => setAuthPassword(e.target.value)}
+            className={authError ? 'error' : ''}
+            autoFocus
+          />
+          {authError && <div style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '0.5rem', textAlign: 'center' }}>{authError}</div>}
+          <button type="submit" className="btn btn-primary" style={{ marginTop: '1rem', width: '100%' }}>Authenticate</button>
+        </form>
+      </div>
+
+      {/* Lock Settings Modal */}
+      <div className={`modal ${showLockModal ? 'open' : ''}`}>
+        <div className="modal-content glass-card">
+          <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>Room Security</h3>
+            <button className="close-picker-btn" onClick={() => setShowLockModal(false)}>✕</button>
+          </div>
+          
+          {isRoomLocked ? (
+            <div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>This room is currently password protected.</p>
+              <button className="btn btn-secondary" onClick={handleRemoveLock} style={{ width: '100%', marginTop: '1rem' }}>🔓 Remove Password Protection</button>
+            </div>
+          ) : (
+            <form onSubmit={handleSetLockSubmit}>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Set a password to lock this room. Anyone trying to join will be prompted for it.</p>
+              <input
+                type="password"
+                placeholder="Set Password"
+                value={newRoomPassword}
+                onChange={(e) => setNewRoomPassword(e.target.value)}
+                style={{ width: '100%', marginTop: '0.5rem' }}
+                autoFocus
+              />
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>Lock Room</button>
+            </form>
+          )}
         </div>
       </div>
 

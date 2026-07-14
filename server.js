@@ -45,6 +45,25 @@ function getUserList(roomId) {
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
+    const { pathname } = parsedUrl;
+
+    if (pathname === '/api/rooms') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store'
+      });
+      const activeRooms = Array.from(rooms.entries()).map(([id, room]) => ({
+        id,
+        userCount: room.users.size,
+        isLocked: !!room.password
+      }));
+      res.end(JSON.stringify({ rooms: activeRooms }));
+      return;
+    }
+
     handle(req, res, parsedUrl);
   });
 
@@ -60,18 +79,31 @@ app.prepare().then(() => {
 
         switch (data.type) {
           case 'join': {
-            const { roomId, nickname } = data;
+            const { roomId, nickname, password } = data;
             currentRoomId = roomId;
             userId = Math.random().toString(36).substring(2, 9);
 
             if (!rooms.has(roomId)) {
               rooms.set(roomId, {
-                code: '// Welcome to HiveCode! Share this URL with others to collaborate.\n',
-                users: new Map()
+                code: '// Welcome to CodeSync! Share this URL with others to collaborate.\n',
+                users: new Map(),
+                messages: [],        // Keeps last 100 messages
+                typingUsers: new Map(), // userId -> name
+                password: null      // Password protection, default null
               });
             }
 
             const room = rooms.get(roomId);
+
+            // Verify Password
+            if (room.password && password !== room.password) {
+              ws.send(JSON.stringify({
+                type: 'auth-required',
+                error: password ? 'Incorrect password! Please try again.' : null
+              }));
+              break;
+            }
+
             const userObj = {
               id: userId,
               name: nickname || `User-${userId}`,
@@ -86,7 +118,10 @@ app.prepare().then(() => {
               type: 'init',
               code: room.code,
               userId: userId,
-              users: getUserList(roomId)
+              users: getUserList(roomId),
+              messages: room.messages,
+              typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name })),
+              isLocked: !!room.password
             }));
 
             // Notify existing room members of the new join
@@ -138,14 +173,121 @@ app.prepare().then(() => {
             if (room) {
               const user = room.users.get(ws);
               if (user) {
-                broadcastToRoom(currentRoomId, {
-                  type: 'chat-message',
+                const msgId = Math.random().toString(36).substring(2, 9);
+                const messageObj = {
+                  id: msgId,
                   sender: user.name,
+                  senderId: userId,
                   color: user.color,
                   text: data.text,
+                  isGif: !!data.isGif,
+                  replyTo: data.replyTo || null,
+                  reactions: {},
                   time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                };
+                
+                room.messages.push(messageObj);
+                if (room.messages.length > 100) {
+                  room.messages.shift();
+                }
+
+                broadcastToRoom(currentRoomId, {
+                  type: 'chat-message',
+                  message: messageObj
                 });
               }
+            }
+            break;
+          }
+
+          case 'chat-reaction': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              const user = room.users.get(ws);
+              if (user) {
+                const { messageId, emoji } = data;
+                const msgObj = room.messages.find(m => m.id === messageId);
+                if (msgObj) {
+                  if (!msgObj.reactions) {
+                    msgObj.reactions = {};
+                  }
+                  if (!msgObj.reactions[emoji]) {
+                    msgObj.reactions[emoji] = [];
+                  }
+                  
+                  const index = msgObj.reactions[emoji].indexOf(user.name);
+                  if (index > -1) {
+                    msgObj.reactions[emoji].splice(index, 1);
+                    if (msgObj.reactions[emoji].length === 0) {
+                      delete msgObj.reactions[emoji];
+                    }
+                  } else {
+                    msgObj.reactions[emoji].push(user.name);
+                  }
+                  
+                  broadcastToRoom(currentRoomId, {
+                    type: 'chat-reaction-update',
+                    messageId: messageId,
+                    reactions: msgObj.reactions
+                  });
+                }
+              }
+            }
+            break;
+          }
+
+          case 'typing-start': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              const user = room.users.get(ws);
+              if (user) {
+                room.typingUsers.set(userId, user.name);
+                broadcastToRoom(currentRoomId, {
+                  type: 'typing-update',
+                  typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name }))
+                }, ws);
+              }
+            }
+            break;
+          }
+
+          case 'typing-stop': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              room.typingUsers.delete(userId);
+              broadcastToRoom(currentRoomId, {
+                type: 'typing-update',
+                typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name }))
+              }, ws);
+            }
+            break;
+          }
+
+          case 'set-room-password': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              room.password = data.password;
+              broadcastToRoom(currentRoomId, {
+                type: 'room-lock-status',
+                isLocked: true
+              });
+            }
+            break;
+          }
+
+          case 'remove-room-password': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              room.password = null;
+              broadcastToRoom(currentRoomId, {
+                type: 'room-lock-status',
+                isLocked: false
+              });
             }
             break;
           }
@@ -162,6 +304,7 @@ app.prepare().then(() => {
 
         if (departingUser) {
           room.users.delete(ws);
+          room.typingUsers.delete(userId);
 
           // If room is empty, clean it up
           if (room.users.size === 0) {
@@ -173,6 +316,10 @@ app.prepare().then(() => {
               userId: userId,
               userName: departingUser.name,
               users: getUserList(currentRoomId)
+            });
+            broadcastToRoom(currentRoomId, {
+              type: 'typing-update',
+              typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name }))
             });
           }
         }
