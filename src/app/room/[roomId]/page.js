@@ -308,11 +308,12 @@ export default function RoomPage() {
             <span className="room-label">ROOM:</span>
             <span className="room-id">{roomId || '--------'}</span>
             <button className="header-btn" onClick={handleShare} title="Copy Share Link">
-              <span>Share Link</span>
+              <span className="btn-text">Share Link</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
             <button className="header-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)} title={isSidebarOpen ? "Hide Chat" : "Show Chat"}>
-              <span>{isSidebarOpen ? '💬 Hide Chat' : '💬 Show Chat'}</span>
+              <span>💬</span>
+              <span className="btn-text">{isSidebarOpen ? ' Hide Chat' : ' Show Chat'}</span>
             </button>
           </div>
         </div>

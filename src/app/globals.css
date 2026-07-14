@@ -83,6 +83,7 @@ body {
 .logo-text {
   background: linear-gradient(135deg, var(--text-color) 30%, var(--primary-color) 70%, var(--secondary-color));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -921,27 +922,125 @@ input.error {
 /* Responsive design */
 @media (max-width: 900px) {
   .workspace {
-    flex-direction: column;
+    position: relative; /* Essential for absolute overlay positioning of the sidebar */
   }
+
   .sidebar-pane {
-    width: 100%;
-    height: 300px;
-    border-left: none;
-    border-top: 1px solid var(--border-color);
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    height: 100%;
+    width: 320px !important; /* Fixed width when slid in */
+    min-width: 320px !important;
+    max-width: 85vw; /* Respect very small screens */
+    z-index: 50;
+    border-left: 1px solid var(--border-color);
+    border-top: none;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
+    transform: translateX(0);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
   }
+
+  .sidebar-pane.collapsed {
+    transform: translateX(100%);
+    width: 320px !important;
+    min-width: 320px !important;
+    border-left: none !important;
+    opacity: 0;
+    pointer-events: none;
+  }
+
   .editor-pane {
+    width: 100%;
+    flex: 1;
     border-right: none;
   }
 }
 
 @media (max-width: 768px) {
+  /* Landing page adaptations */
   .features {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
+  
   .logo {
     font-size: 2.25rem;
   }
+  
+  .tagline {
+    font-size: 1rem;
+    padding: 0 1rem;
+  }
+  
   .glass-card {
     padding: 1.75rem;
+    max-width: 92vw;
+  }
+
+  /* Room page header adaptations */
+  .room-header {
+    padding: 0 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .header-left {
+    gap: 0.75rem;
+  }
+
+  .room-info {
+    padding: 0.25rem 0.5rem;
+    gap: 0.35rem;
+  }
+
+  .room-label {
+    display: none; /* Hide 'ROOM:' label to save horizontal space */
+  }
+
+  .header-btn {
+    padding: 0.35rem;
+    margin-left: 0.25rem;
+  }
+
+  /* Hide button text to keep room info compact and clean */
+  .header-btn .btn-text {
+    display: none;
+  }
+
+  .header-btn svg {
+    margin: 0; /* Align icon center */
+  }
+
+  /* Room ID styling tweaks */
+  .room-id {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Ultra-compact tweaks for mobile */
+  .user-presence {
+    gap: 0.2rem;
+  }
+
+  .user-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 0.7rem;
+  }
+
+  /* Compact header layout */
+  .room-header .logo .logo-text {
+    display: none; /* Hide text, keep only brackets as an icon */
+  }
+
+  .room-header .logo {
+    font-size: 1.25rem;
+    gap: 0.1rem;
+  }
+
+  .room-info {
+    font-size: 0.75rem;
   }
 }
