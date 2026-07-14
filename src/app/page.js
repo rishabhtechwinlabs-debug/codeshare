@@ -7,8 +7,8 @@ export default function LandingPage() {
   const router = useRouter();
   const [nickname, setNickname] = useState('');
   const [roomIdInput, setRoomIdInput] = useState('');
-  const [nicknameError, setNicknameError] = useState(false);
-  const [roomError, setRoomError] = useState(false);
+  const [nicknameError, setNicknameError] = useState('');
+  const [roomError, setRoomError] = useState('');
 
   useEffect(() => {
     // Load saved nickname if exists
@@ -29,27 +29,33 @@ export default function LandingPage() {
 
   function getCleanRoomId(inputVal) {
     if (!inputVal) return '';
-    
-    // Check if input is a full link (e.g. http://localhost:3000/room/abcd123)
-    try {
-      const url = new URL(inputVal);
-      if (url.pathname.startsWith('/room/')) {
-        return url.pathname.substring(6); // Extract the ID after "/room/"
-      }
-    } catch (e) {
-      // Not a valid URL, treat as direct Room ID
+    let val = inputVal.trim();
+
+    // 1. Remove protocol if present (http, https, ws, wss)
+    val = val.replace(/^(https?:\/\/)?(wss?:\/\/)?/, '');
+
+    // 2. If it contains a "/room/" subpath, extract what's after it
+    const roomIndex = val.indexOf('/room/');
+    if (roomIndex !== -1) {
+      val = val.substring(roomIndex + 6);
     }
 
-    return inputVal.trim();
+    // 3. Remove any leading/trailing slashes
+    val = val.replace(/^\/+|\/+$/g, '');
+
+    // 4. Remove any query parameters or hash fragments
+    val = val.split(/[?#]/)[0];
+
+    return val.trim();
   }
 
   function validateNickname() {
     const name = nickname.trim();
     if (!name) {
-      setNicknameError(true);
-      setTimeout(() => setNicknameError(false), 1000);
+      setNicknameError('Nickname is required to enter a room');
       return null;
     }
+    setNicknameError('');
     sessionStorage.setItem('nickname', name);
     return name;
   }
@@ -68,10 +74,10 @@ export default function LandingPage() {
 
     const cleanId = getCleanRoomId(roomIdInput);
     if (!cleanId) {
-      setRoomError(true);
-      setTimeout(() => setRoomError(false), 1000);
+      setRoomError('Please enter a valid Room ID or link');
       return;
     }
+    setRoomError('');
 
     router.push(`/room/${cleanId}`);
   }
@@ -107,7 +113,10 @@ export default function LandingPage() {
                 maxLength={15} 
                 autoComplete="off"
                 value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
+                onChange={(e) => {
+                  setNickname(e.target.value);
+                  if (e.target.value.trim()) setNicknameError('');
+                }}
                 className={nicknameError ? 'error' : ''}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter') {
@@ -120,6 +129,7 @@ export default function LandingPage() {
                 }}
               />
             </div>
+            {nicknameError && <span className="error-message">{nicknameError}</span>}
           </div>
 
           <div className="action-divider">
@@ -144,7 +154,10 @@ export default function LandingPage() {
                 placeholder="Enter Room ID or link" 
                 autoComplete="off"
                 value={roomIdInput}
-                onChange={(e) => setRoomIdInput(e.target.value)}
+                onChange={(e) => {
+                  setRoomIdInput(e.target.value);
+                  if (e.target.value.trim()) setRoomError('');
+                }}
                 className={roomError ? 'error' : ''}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter') {
@@ -155,6 +168,7 @@ export default function LandingPage() {
             </div>
             <button id="join-room-btn" className="btn btn-secondary" onClick={handleJoinRoom}>Join</button>
           </div>
+          {roomError && <span className="error-message">{roomError}</span>}
         </div>
 
         <section className="features">

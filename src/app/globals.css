@@ -876,6 +876,14 @@ input.error {
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2) !important;
 }
 
+.error-message {
+  color: #f87171;
+  font-size: 0.8rem;
+  margin-top: 0.35rem;
+  display: block;
+}
+
+
 /* Animations */
 @keyframes fadeInDown {
   from {
