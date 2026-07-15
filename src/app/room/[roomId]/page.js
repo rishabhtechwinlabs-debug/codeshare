@@ -498,7 +498,7 @@ export default function RoomPage() {
       setLoadingGifs(true);
       const apiKey = process.env.NEXT_PUBLIC_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
       try {
-        const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=36&rating=R`);
+        const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=48&rating=r`);
         const result = await res.json();
         if (result.data && result.data.length > 0) {
           const formatted = result.data.map(item => ({
