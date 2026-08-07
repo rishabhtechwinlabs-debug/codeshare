@@ -116,194 +116,205 @@ export default function RoomPage() {
       text,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     };
-    setActivityLogs(prev => [newLog, ...prev]);
+    setActivityLogs(prev => [newLog, ...prev.slice(0, 99)]);
   };
 
   // Main Editor & Socket initialization
   useEffect(() => {
     if (!nickname || !roomId) return; // Wait for nickname and roomId
 
-    let socket = null;
-    let editor = null;
     let checkInterval = null;
     let reconnectTimeout = null;
+    let isComponentMounted = true;
 
-    const initEditorAndWS = () => {
+    const connectWebSocket = () => {
+      if (!isComponentMounted) return;
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/ws`;
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        const savedPw = sessionStorage.getItem('room_pw_' + roomId) || '';
+        socket.send(JSON.stringify({
+          type: 'join',
+          roomId: roomId,
+          nickname: nickname,
+          password: savedPw
+        }));
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const editor = editorRef.current;
+
+          switch (data.type) {
+            case 'init': {
+              myUserIdRef.current = data.userId;
+              if (editor) {
+                isRemoteChangeRef.current = true;
+                editor.setValue(data.code);
+                isRemoteChangeRef.current = false;
+              }
+
+              setUsers(data.users);
+              if (data.messages) {
+                setChatMessages(data.messages);
+              }
+              if (data.typingUsers) {
+                setTypingUsers(data.typingUsers.filter(u => u.id !== data.userId));
+              }
+              
+              setIsAuthRequired(false);
+              setAuthError('');
+              setIsRoomLocked(!!data.isLocked);
+              if (authPassword) {
+                sessionStorage.setItem('room_pw_' + roomId, authPassword);
+              }
+              addActivityLog(`✨ Joined room "${roomId}" as "${nicknameRef.current}"`);
+              break;
+            }
+
+            case 'code-update': {
+              if (data.userId === myUserIdRef.current || !editor) return;
+              isRemoteChangeRef.current = true;
+              const cursor = editor.getCursor();
+              const scrollInfo = editor.getScrollInfo();
+
+              editor.setValue(data.code);
+
+              editor.setCursor(cursor);
+              editor.scrollTo(scrollInfo.left, scrollInfo.top);
+              isRemoteChangeRef.current = false;
+              break;
+            }
+
+            case 'user-joined': {
+              showToast(`👥 ${data.user.name} joined the studio!`, 'join');
+              setUsers(data.users);
+              addActivityLog(`👤 User "${data.user.name}" joined the studio`);
+              break;
+            }
+
+            case 'user-left': {
+              showToast(`🚪 ${data.userName} left the studio.`, 'leave');
+              setUsers(data.users);
+              addActivityLog(`🚪 User "${data.userName}" left the studio`);
+
+              // Clear their cursor bookmark
+              if (remoteCursorsRef.current.has(data.userId)) {
+                remoteCursorsRef.current.get(data.userId).clear();
+                remoteCursorsRef.current.delete(data.userId);
+              }
+              break;
+            }
+
+            case 'cursor-update': {
+              if (data.userId === myUserIdRef.current || !editor) return;
+              updateRemoteCursor(editor, data.userId, data.cursor, data.color, data.name);
+              break;
+            }
+
+            case 'chat-message': {
+              setChatMessages(prev => [...prev, data.message]);
+              break;
+            }
+
+            case 'chat-reaction-update': {
+              setChatMessages(prev => prev.map(msg => {
+                if (msg.id === data.messageId) {
+                  return { ...msg, reactions: data.reactions };
+                }
+                return msg;
+              }));
+              break;
+            }
+
+            case 'typing-update': {
+              setTypingUsers(data.typingUsers.filter(u => u.id !== myUserIdRef.current));
+              break;
+            }
+
+            case 'auth-required': {
+              setIsAuthRequired(true);
+              if (data.error) {
+                setAuthError(data.error);
+              }
+              break;
+            }
+
+            case 'room-lock-status': {
+              setIsRoomLocked(data.isLocked);
+              if (!data.isLocked) {
+                sessionStorage.removeItem('room_pw_' + roomId);
+                setAuthPassword('');
+              }
+              showToast(data.isLocked ? '🔒 Room is now password protected!' : '🔓 Room is now unlocked!', 'join');
+              addActivityLog(data.isLocked ? '🔒 Password protection enabled for this room' : '🔓 Password protection disabled');
+              break;
+            }
+          }
+        } catch (err) {
+          console.error('Error processing websocket message:', err);
+        }
+      };
+
+      socket.onclose = () => {
+        if (!isComponentMounted) return;
+        showToast('⚠️ Connection lost. Retrying...', 'leave');
+        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+      };
+    };
+
+    const setupEditorAndConnect = () => {
       if (typeof window !== 'undefined' && window.CodeMirror) {
         clearInterval(checkInterval);
 
-        // Initialize CodeMirror
-        editor = window.CodeMirror.fromTextArea(document.getElementById('code-editor'), {
-          lineNumbers: true,
-          theme: 'dracula',
-          mode: null, // Plain Text mode
-          tabSize: 2,
-          lineWrapping: true,
-          matchBrackets: true,
-          autoCloseBrackets: true
-        });
-        editorRef.current = editor;
+        // Only create editor if not already initialized
+        if (!editorRef.current) {
+          const editor = window.CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+            lineNumbers: true,
+            theme: 'dracula',
+            mode: null, // Plain Text mode
+            tabSize: 2,
+            lineWrapping: true,
+            matchBrackets: true,
+            autoCloseBrackets: true
+          });
+          editorRef.current = editor;
 
-        // Protocol mapping
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/api/ws`;
-        socket = new WebSocket(wsUrl);
-        socketRef.current = socket;
+          // Local editor event listeners
+          editor.on('change', () => {
+            if (isRemoteChangeRef.current || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+            socketRef.current.send(JSON.stringify({
+              type: 'code-update',
+              code: editor.getValue()
+            }));
+          });
 
-        socket.onopen = () => {
-          const savedPw = sessionStorage.getItem('room_pw_' + roomId) || '';
-          socket.send(JSON.stringify({
-            type: 'join',
-            roomId: roomId,
-            nickname: nickname,
-            password: savedPw
-          }));
-        };
+          editor.on('cursorActivity', () => {
+            if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+            socketRef.current.send(JSON.stringify({
+              type: 'cursor-update',
+              cursor: editor.getCursor()
+            }));
+          });
+        }
 
-        socket.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-
-            switch (data.type) {
-              case 'init': {
-                myUserIdRef.current = data.userId;
-                isRemoteChangeRef.current = true;
-                editor.setValue(data.code);
-                isRemoteChangeRef.current = false;
-
-                setUsers(data.users);
-                if (data.messages) {
-                  setChatMessages(data.messages);
-                }
-                if (data.typingUsers) {
-                  setTypingUsers(data.typingUsers.filter(u => u.id !== data.userId));
-                }
-                
-                setIsAuthRequired(false);
-                setAuthError('');
-                setIsRoomLocked(!!data.isLocked);
-                if (authPassword) {
-                  sessionStorage.setItem('room_pw_' + roomId, authPassword);
-                }
-                addActivityLog(`✨ Joined room "${roomId}" as "${nicknameRef.current}"`);
-                break;
-              }
-
-              case 'code-update': {
-                if (data.userId === myUserIdRef.current) return;
-                isRemoteChangeRef.current = true;
-                const cursor = editor.getCursor();
-                const scrollInfo = editor.getScrollInfo();
-
-                editor.setValue(data.code);
-
-                editor.setCursor(cursor);
-                editor.scrollTo(scrollInfo.left, scrollInfo.top);
-                isRemoteChangeRef.current = false;
-                break;
-              }
-
-              case 'user-joined': {
-                showToast(`👥 ${data.user.name} joined the studio!`, 'join');
-                setUsers(data.users);
-                addActivityLog(`👤 User "${data.user.name}" joined the studio`);
-                break;
-              }
-
-              case 'user-left': {
-                showToast(`🚪 ${data.userName} left the studio.`, 'leave');
-                setUsers(data.users);
-                addActivityLog(`🚪 User "${data.userName}" left the studio`);
-
-                // Clear their cursor bookmark
-                if (remoteCursorsRef.current.has(data.userId)) {
-                  remoteCursorsRef.current.get(data.userId).clear();
-                  remoteCursorsRef.current.delete(data.userId);
-                }
-                break;
-              }
-
-              case 'cursor-update': {
-                if (data.userId === myUserIdRef.current) return;
-                updateRemoteCursor(editor, data.userId, data.cursor, data.color, data.name);
-                break;
-              }
-
-              case 'chat-message': {
-                setChatMessages(prev => [...prev, data.message]);
-                break;
-              }
-
-              case 'chat-reaction-update': {
-                setChatMessages(prev => prev.map(msg => {
-                  if (msg.id === data.messageId) {
-                    return { ...msg, reactions: data.reactions };
-                  }
-                  return msg;
-                }));
-                break;
-              }
-
-              case 'typing-update': {
-                setTypingUsers(data.typingUsers.filter(u => u.id !== myUserIdRef.current));
-                break;
-              }
-
-              case 'auth-required': {
-                setIsAuthRequired(true);
-                if (data.error) {
-                  setAuthError(data.error);
-                }
-                break;
-              }
-
-              case 'room-lock-status': {
-                setIsRoomLocked(data.isLocked);
-                if (!data.isLocked) {
-                  sessionStorage.removeItem('room_pw_' + roomId);
-                  setAuthPassword('');
-                }
-                showToast(data.isLocked ? '🔒 Room is now password protected!' : '🔓 Room is now unlocked!', 'join');
-                addActivityLog(data.isLocked ? '🔒 Password protection enabled for this room' : '🔓 Password protection disabled');
-                break;
-              }
-            }
-          } catch (err) {
-            console.error('Error processing websocket message:', err);
-          }
-        };
-
-        socket.onclose = () => {
-          showToast('⚠️ Connection lost. Retrying...', 'leave');
-          reconnectTimeout = setTimeout(initEditorAndWS, 3000);
-        };
-
-        // Editor local changes listeners
-        editor.on('change', () => {
-          if (isRemoteChangeRef.current || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
-          socketRef.current.send(JSON.stringify({
-            type: 'code-update',
-            code: editor.getValue()
-          }));
-        });
-
-        editor.on('cursorActivity', () => {
-          if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
-          socketRef.current.send(JSON.stringify({
-            type: 'cursor-update',
-            cursor: editor.getCursor()
-          }));
-        });
+        connectWebSocket();
       }
     };
 
     if (typeof window !== 'undefined' && window.CodeMirror) {
-      initEditorAndWS();
+      setupEditorAndConnect();
     } else {
-      checkInterval = setInterval(initEditorAndWS, 50);
+      checkInterval = setInterval(setupEditorAndConnect, 50);
     }
 
     return () => {
+      isComponentMounted = false;
       clearInterval(checkInterval);
       clearTimeout(reconnectTimeout);
       if (typingTimeoutRef.current) {
@@ -312,16 +323,16 @@ export default function RoomPage() {
       if (gifDebounceTimeoutRef.current) {
         clearTimeout(gifDebounceTimeoutRef.current);
       }
-      if (socket) {
-        socket.onclose = null;
-        socket.onerror = null;
-        socket.close();
+      if (socketRef.current) {
+        socketRef.current.onclose = null;
+        socketRef.current.onerror = null;
+        socketRef.current.close();
+        socketRef.current = null;
       }
-      socketRef.current = null;
-      if (editor) {
-        editor.toTextArea();
+      if (editorRef.current) {
+        editorRef.current.toTextArea();
+        editorRef.current = null;
       }
-      editorRef.current = null;
     };
   }, [nickname, roomId]);
 

@@ -2,6 +2,7 @@ const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 const WebSocket = require('ws');
+const { supabase } = require('./src/lib/supabase');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -9,8 +10,9 @@ const handle = app.getRequestHandler();
 
 const PORT = process.env.PORT || 3000;
 
-// Map of roomId -> { code: string, language: string, users: Map(ws -> { id: string, name: string, color: string, cursor: { line: number, ch: number } }) }
+// Map of roomId -> { code: string, users: Map(ws -> { id: string, name: string, color: string, cursor: object }), messages: Array, typingUsers: Map, password: string|null }
 const rooms = new Map();
+const codeSaveDebounceTimers = new Map(); // roomId -> setTimeout handle
 
 // Helper to generate a random bright color for users
 function getRandomColor() {
@@ -42,6 +44,121 @@ function getUserList(roomId) {
   return Array.from(room.users.values());
 }
 
+// Supabase DB Persistence Helpers
+async function getOrLoadRoom(roomId) {
+  if (rooms.has(roomId)) {
+    return rooms.get(roomId);
+  }
+
+  const roomData = {
+    code: '// Welcome to HiveCode! Share this URL with others to collaborate.\n',
+    users: new Map(),
+    messages: [],
+    typingUsers: new Map(),
+    password: null
+  };
+
+  if (supabase) {
+    try {
+      const { data: dbRoom } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single();
+
+      if (dbRoom) {
+        roomData.code = dbRoom.code || roomData.code;
+        roomData.password = dbRoom.password || null;
+
+        const { data: dbMessages } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('room_id', roomId)
+          .order('created_at', { ascending: true })
+          .limit(100);
+
+        if (dbMessages && dbMessages.length > 0) {
+          roomData.messages = dbMessages.map(m => ({
+            id: m.id,
+            sender: m.sender,
+            senderId: m.sender_id,
+            color: m.color,
+            text: m.text,
+            isGif: m.is_gif,
+            replyTo: m.reply_to,
+            reactions: m.reactions || {},
+            time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }));
+        }
+      }
+    } catch (err) {
+      // Room load fallback
+    }
+  }
+
+  rooms.set(roomId, roomData);
+  return roomData;
+}
+
+function scheduleCodeSave(roomId, code) {
+  if (!supabase) return;
+
+  if (codeSaveDebounceTimers.has(roomId)) {
+    clearTimeout(codeSaveDebounceTimers.get(roomId));
+  }
+
+  const timer = setTimeout(async () => {
+    try {
+      await supabase
+        .from('rooms')
+        .upsert({
+          id: roomId,
+          code: code,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+    } catch (err) {
+      console.error(`Error saving room code for ${roomId}:`, err.message);
+    } finally {
+      codeSaveDebounceTimers.delete(roomId);
+    }
+  }, 2000);
+
+  codeSaveDebounceTimers.set(roomId, timer);
+}
+
+async function saveMessageToDB(roomId, msgObj) {
+  if (!supabase) return;
+  try {
+    await supabase.from('rooms').upsert({ id: roomId }, { onConflict: 'id' });
+    await supabase.from('messages').insert({
+      id: msgObj.id,
+      room_id: roomId,
+      sender: msgObj.sender,
+      sender_id: msgObj.senderId,
+      color: msgObj.color,
+      text: msgObj.text,
+      is_gif: msgObj.isGif,
+      reply_to: msgObj.replyTo,
+      reactions: msgObj.reactions || {}
+    });
+  } catch (err) {
+    console.error('Error saving message to Supabase:', err.message);
+  }
+}
+
+async function updateRoomPasswordInDB(roomId, password) {
+  if (!supabase) return;
+  try {
+    await supabase.from('rooms').upsert({
+      id: roomId,
+      password: password,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'id' });
+  } catch (err) {
+    console.error('Error updating room password in Supabase:', err.message);
+  }
+}
+
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
@@ -69,31 +186,40 @@ app.prepare().then(() => {
 
   const wss = new WebSocket.Server({ noServer: true });
 
+  // Heartbeat ping interval (30s) to terminate dead/unresponsive connections
+  const heartbeatInterval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (ws.isAlive === false) {
+        return ws.terminate();
+      }
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+
+  wss.on('close', () => {
+    clearInterval(heartbeatInterval);
+  });
+
   wss.on('connection', (ws) => {
     let currentRoomId = null;
     let userId = null;
 
-    ws.on('message', (message) => {
+    ws.isAlive = true;
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
+
+    ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message);
 
         switch (data.type) {
           case 'join': {
             const { roomId, nickname, password } = data;
-            currentRoomId = roomId;
-            userId = Math.random().toString(36).substring(2, 9);
 
-            if (!rooms.has(roomId)) {
-              rooms.set(roomId, {
-                code: '// Welcome to HiveCode! Share this URL with others to collaborate.\n',
-                users: new Map(),
-                messages: [],        // Keeps last 100 messages
-                typingUsers: new Map(), // userId -> name
-                password: null      // Password protection, default null
-              });
-            }
-
-            const room = rooms.get(roomId);
+            let isNewRoom = !rooms.has(roomId);
+            const room = await getOrLoadRoom(roomId);
 
             // Verify Password
             if (room.password && password !== room.password) {
@@ -101,8 +227,15 @@ app.prepare().then(() => {
                 type: 'auth-required',
                 error: password ? 'Incorrect password! Please try again.' : null
               }));
+
+              if (isNewRoom && room.users.size === 0) {
+                rooms.delete(roomId);
+              }
               break;
             }
+
+            currentRoomId = roomId;
+            userId = Math.random().toString(36).substring(2, 9);
 
             const userObj = {
               id: userId,
@@ -113,7 +246,7 @@ app.prepare().then(() => {
 
             room.users.set(ws, userObj);
 
-            // Send current state to the joining user
+            // Send current state to joining user
             ws.send(JSON.stringify({
               type: 'init',
               code: room.code,
@@ -124,7 +257,7 @@ app.prepare().then(() => {
               isLocked: !!room.password
             }));
 
-            // Notify existing room members of the new join
+            // Notify existing room members of new join
             broadcastToRoom(roomId, {
               type: 'user-joined',
               user: userObj,
@@ -139,6 +272,7 @@ app.prepare().then(() => {
             const room = rooms.get(currentRoomId);
             if (room) {
               room.code = data.code;
+              scheduleCodeSave(currentRoomId, data.code);
               broadcastToRoom(currentRoomId, {
                 type: 'code-update',
                 code: data.code,
@@ -154,7 +288,7 @@ app.prepare().then(() => {
             if (room) {
               const user = room.users.get(ws);
               if (user) {
-                user.cursor = data.cursor; // { line, ch } or null
+                user.cursor = data.cursor;
                 broadcastToRoom(currentRoomId, {
                   type: 'cursor-update',
                   userId: userId,
@@ -190,6 +324,8 @@ app.prepare().then(() => {
                 if (room.messages.length > 100) {
                   room.messages.shift();
                 }
+
+                saveMessageToDB(currentRoomId, messageObj);
 
                 broadcastToRoom(currentRoomId, {
                   type: 'chat-message',
@@ -271,6 +407,7 @@ app.prepare().then(() => {
             const room = rooms.get(currentRoomId);
             if (room) {
               room.password = data.password;
+              updateRoomPasswordInDB(currentRoomId, data.password);
               broadcastToRoom(currentRoomId, {
                 type: 'room-lock-status',
                 isLocked: true
@@ -284,6 +421,7 @@ app.prepare().then(() => {
             const room = rooms.get(currentRoomId);
             if (room) {
               room.password = null;
+              updateRoomPasswordInDB(currentRoomId, null);
               broadcastToRoom(currentRoomId, {
                 type: 'room-lock-status',
                 isLocked: false
@@ -304,24 +442,24 @@ app.prepare().then(() => {
 
         if (departingUser) {
           room.users.delete(ws);
-          room.typingUsers.delete(userId);
-
-          // If room is empty, clean it up
-          if (room.users.size === 0) {
-            rooms.delete(currentRoomId);
-          } else {
-            // Notify remaining users
-            broadcastToRoom(currentRoomId, {
-              type: 'user-left',
-              userId: userId,
-              userName: departingUser.name,
-              users: getUserList(currentRoomId)
-            });
-            broadcastToRoom(currentRoomId, {
-              type: 'typing-update',
-              typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name }))
-            });
+          if (userId) {
+            room.typingUsers.delete(userId);
           }
+        }
+
+        if (room.users.size === 0) {
+          rooms.delete(currentRoomId);
+        } else if (departingUser) {
+          broadcastToRoom(currentRoomId, {
+            type: 'user-left',
+            userId: userId,
+            userName: departingUser.name,
+            users: getUserList(currentRoomId)
+          });
+          broadcastToRoom(currentRoomId, {
+            type: 'typing-update',
+            typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name }))
+          });
         }
       }
     });
@@ -330,7 +468,6 @@ app.prepare().then(() => {
   server.on('upgrade', (request, socket, head) => {
     const { pathname } = parse(request.url);
 
-    // Only handle upgrades on our custom websocket endpoint /api/ws
     if (pathname === '/api/ws') {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);

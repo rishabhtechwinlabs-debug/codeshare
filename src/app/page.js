@@ -11,22 +11,28 @@ export default function LandingPage() {
   const [roomError, setRoomError] = useState('');
   const [activeRooms, setActiveRooms] = useState([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
+  const isMountedRef = useRef(true);
 
   const fetchActiveRooms = async () => {
+    setLoadingRooms(true);
     try {
       const res = await fetch('/api/rooms');
       const data = await res.json();
-      if (data && data.rooms) {
+      if (isMountedRef.current && data && data.rooms) {
         setActiveRooms(data.rooms);
       }
     } catch (e) {
       console.error('Error fetching rooms:', e);
     } finally {
-      setLoadingRooms(false);
+      if (isMountedRef.current) {
+        setLoadingRooms(false);
+      }
     }
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
+
     // Load saved nickname if exists
     const savedName = sessionStorage.getItem('nickname');
     if (savedName) {
@@ -35,7 +41,11 @@ export default function LandingPage() {
 
     fetchActiveRooms();
     const interval = setInterval(fetchActiveRooms, 5000);
-    return () => clearInterval(interval);
+
+    return () => {
+      isMountedRef.current = false;
+      clearInterval(interval);
+    };
   }, []);
 
   function generateRoomId() {
