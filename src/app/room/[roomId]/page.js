@@ -952,9 +952,13 @@ export default function RoomPage() {
     };
 
     pc.ontrack = (event) => {
+      if (event.track) {
+        event.track.enabled = true;
+      }
       const handleTrackUpdate = () => {
         if (event.streams && event.streams[0]) {
           const tracks = event.streams[0].getTracks();
+          tracks.forEach(t => { t.enabled = true; });
           setRemoteStreams(prev => ({
             ...prev,
             [targetUserId]: new MediaStream(tracks)
@@ -1761,9 +1765,20 @@ export default function RoomPage() {
           key={`audio-${peerId}`}
           autoPlay
           playsInline
+          onLoadedMetadata={(e) => {
+            if (e.target) {
+              e.target.muted = false;
+              e.target.volume = 1.0;
+              e.target.play().catch(err => console.warn('Audio metadata play trigger:', err));
+            }
+          }}
           ref={el => {
-            if (el && el.srcObject !== stream) {
-              el.srcObject = stream;
+            if (el) {
+              if (el.srcObject !== stream) {
+                el.srcObject = stream;
+              }
+              el.muted = false;
+              el.volume = 1.0;
               el.play().catch(err => console.warn('Audio play trigger warning:', err));
             }
           }}
