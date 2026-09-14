@@ -846,7 +846,7 @@ export default function RoomPage() {
     if (!candidate || !candidate.candidate) return;
     if (pc && pc.remoteDescription && pc.remoteDescription.type) {
       try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        await pc.addIceCandidate(candidate);
       } catch (e) {
         console.error('Error adding ICE candidate:', e);
       }
@@ -864,7 +864,7 @@ export default function RoomPage() {
     for (const candidate of candidates) {
       if (!candidate || !candidate.candidate) continue;
       try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        await pc.addIceCandidate(candidate);
       } catch (e) {
         console.error('Error flushing candidate:', e);
       }
@@ -986,67 +986,60 @@ export default function RoomPage() {
       delete peerConnectionsRef.current[targetUserId];
     }
 
-    // Comprehensive STUN and TURN configuration for 100% NAT & Firewall traversal
+    // Reliable Public STUN configuration
     pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:openrelay.metered.ca:80' },
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        }
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ],
-      iceCandidatePoolSize: 10,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require'
     });
 
     ensureLocalTracksOnPeerConnection(pc);
 
-    // Track WebRTC connection lifecycle states with automated recovery
+    // Track WebRTC connection lifecycle states with non-destructive ICE restart
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: state }));
 
       if (state === 'failed') {
-        console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed. Auto-recovering...`);
-        setTimeout(() => {
-          if (isInCallRef.current && activeCallUsersRef.current.includes(targetUserId)) {
-            try { pc.close(); } catch (e) {}
-            delete peerConnectionsRef.current[targetUserId];
-            const shouldInitiate = myUserIdRef.current < targetUserId;
-            createPeerConnection(targetUserId, shouldInitiate);
-          }
-        }, 1500);
+        console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed. Performing ICE restart...`);
+        // Only initiator triggers ICE restart to avoid negotiation glare
+        if (myUserIdRef.current < targetUserId) {
+          try {
+            pc.restartIce();
+            pc.createOffer({ iceRestart: true }).then(async (offer) => {
+              await pc.setLocalDescription(offer);
+              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                socketRef.current.send(JSON.stringify({
+                  type: 'webrtc-signal',
+                  targetUserId: targetUserId,
+                  signal: { type: 'offer', offer: pc.localDescription }
+                }));
+              }
+            }).catch(e => console.warn('[WebRTC] ICE restart offer error:', e));
+          } catch (e) {}
+        }
       }
     };
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && event.candidate.candidate && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      if (event.candidate && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        const candJson = event.candidate.toJSON ? event.candidate.toJSON() : {
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid,
+          sdpMLineIndex: event.candidate.sdpMLineIndex
+        };
         socketRef.current.send(JSON.stringify({
           type: 'webrtc-signal',
           targetUserId: targetUserId,
           signal: {
             type: 'candidate',
-            candidate: {
-              candidate: event.candidate.candidate,
-              sdpMid: event.candidate.sdpMid,
-              sdpMLineIndex: event.candidate.sdpMLineIndex,
-              usernameFragment: event.candidate.usernameFragment
-            }
+            candidate: candJson
           }
         }));
       }
@@ -1055,9 +1048,11 @@ export default function RoomPage() {
     pc.oniceconnectionstatechange = () => {
       const iceState = pc.iceConnectionState;
       if (iceState === 'failed') {
-        try {
-          pc.restartIce();
-        } catch (e) {}
+        if (myUserIdRef.current < targetUserId) {
+          try {
+            pc.restartIce();
+          } catch (e) {}
+        }
       }
     };
 
@@ -1085,13 +1080,18 @@ export default function RoomPage() {
           audioEl.volume = 1.0;
           audioElementsRef.current[targetUserId] = audioEl;
         }
-        const audioStream = new MediaStream([audioTrack]);
-        if (audioEl.srcObject !== audioStream) {
+
+        // Deduplicate audio track: only attach if not already present on audio element
+        const existingTrack = audioEl.srcObject?.getAudioTracks()?.[0];
+        if (!existingTrack || existingTrack.id !== audioTrack.id) {
+          const audioStream = new MediaStream([audioTrack]);
           audioEl.srcObject = audioStream;
+          audioEl.play().catch(e => {
+            if (e.name !== 'AbortError') {
+              console.warn('Audio autoplay blocked by browser policy:', e);
+            }
+          });
         }
-        audioEl.play().catch(e => {
-          console.warn('Audio autoplay requires user interaction:', e);
-        });
       }
 
       // 2. Video Track State for UI Video Cards
