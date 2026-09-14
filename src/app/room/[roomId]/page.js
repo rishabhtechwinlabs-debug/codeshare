@@ -127,6 +127,24 @@ export default function RoomPage() {
   const screenStreamRef = useRef(null);
   const audioElementsRef = useRef({});
   const activeCallUsersRef = useRef([]);
+  const iceServersRef = useRef([
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:staticauth.openrelay.metered.ca:80' }
+  ]);
+
+  // Fetch dynamic HMAC-SHA1 WebRTC TURN servers
+  useEffect(() => {
+    fetch('/api/turn')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.iceServers && data.iceServers.length > 0) {
+          iceServersRef.current = data.iceServers;
+        }
+      })
+      .catch(e => console.warn('Could not load dynamic TURN config:', e));
+  }, []);
 
   // Code Execution States
   const [isRunningCode, setIsRunningCode] = useState(false);
@@ -351,13 +369,12 @@ export default function RoomPage() {
                 newActiveUsers.forEach(peerId => {
                   if (peerId !== myUserIdRef.current) {
                     const existingPc = peerConnectionsRef.current[peerId];
-                    const isHealthy = existingPc &&
-                      existingPc.signalingState !== 'closed' &&
-                      existingPc.connectionState !== 'failed' &&
-                      existingPc.connectionState !== 'closed';
-                    if (!isHealthy) {
-                      const shouldInitiate = myUserIdRef.current < peerId;
-                      createPeerConnection(peerId, shouldInitiate);
+                    const isConnected = existingPc &&
+                      (existingPc.connectionState === 'connected' || existingPc.iceConnectionState === 'connected' || existingPc.signalingState === 'have-local-offer');
+
+                    // Lower userId initiates to higher userId to guarantee 1-to-1 connection pairs
+                    if (!isConnected && myUserIdRef.current < peerId) {
+                      createPeerConnection(peerId, true);
                     }
                   }
                 });
@@ -962,10 +979,8 @@ export default function RoomPage() {
         : callActiveUsers;
 
       activePeers.forEach(targetId => {
-        if (targetId !== myUserIdRef.current) {
-          // Deterministic initiator: lower userId initiates
-          const shouldInitiate = myUserIdRef.current < targetId;
-          createPeerConnection(targetId, shouldInitiate);
+        if (targetId !== myUserIdRef.current && myUserIdRef.current < targetId) {
+          createPeerConnection(targetId, true);
         }
       });
     } catch (err) {
@@ -986,15 +1001,9 @@ export default function RoomPage() {
       delete peerConnectionsRef.current[targetUserId];
     }
 
-    // Reliable Public STUN configuration
+    // Dynamic STUN and TURN configuration for 100% multi-device NAT & firewall traversal
     pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
-      ],
+      iceServers: iceServersRef.current,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require'
     });
