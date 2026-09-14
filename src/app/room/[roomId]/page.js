@@ -163,6 +163,11 @@ export default function RoomPage() {
   const peerConnectionsRef = useRef({});
   const localStreamRef = useRef(null);
   const pendingIceCandidatesRef = useRef({});
+  const isInCallRef = useRef(false);
+
+  useEffect(() => {
+    isInCallRef.current = isInCall;
+  }, [isInCall]);
 
   useEffect(() => {
     activeFileRef.current = activeFile;
@@ -293,7 +298,25 @@ export default function RoomPage() {
             }
 
             case 'call-status-update': {
-              setCallActiveUsers(data.callActiveUsers || []);
+              const newActiveUsers = data.callActiveUsers || [];
+              setCallActiveUsers(newActiveUsers);
+
+              // Clean up peer connections and streams for users who left the call
+              Object.keys(peerConnectionsRef.current).forEach(peerId => {
+                if (!newActiveUsers.includes(peerId)) {
+                  if (peerConnectionsRef.current[peerId]) {
+                    peerConnectionsRef.current[peerId].close();
+                    delete peerConnectionsRef.current[peerId];
+                  }
+                  delete pendingIceCandidatesRef.current[peerId];
+                  setRemoteStreams(prev => {
+                    const next = { ...prev };
+                    delete next[peerId];
+                    return next;
+                  });
+                }
+              });
+
               if (data.joinedUserName) {
                 showToast(`🎙️ ${data.joinedUserName} joined the voice call!`, 'join');
               } else if (data.leftUserName) {
@@ -703,6 +726,7 @@ export default function RoomPage() {
       pendingIceCandidatesRef.current = {};
       setRemoteStreams({});
       setIsInCall(false);
+      isInCallRef.current = false;
       setIsVideoOn(false);
       setIsMuted(false);
 
@@ -714,9 +738,22 @@ export default function RoomPage() {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoOn });
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        if (!isVideoOn) {
+          const vt = stream.getVideoTracks()[0];
+          if (vt) vt.enabled = false;
+        }
+      } catch (e) {
+        // Fallback to audio-only if camera is unavailable or permission denied
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setIsVideoOn(false);
+      }
+
       localStreamRef.current = stream;
       setIsInCall(true);
+      isInCallRef.current = true;
       showToast('🎙️ Joined voice call!', 'join');
 
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -735,7 +772,9 @@ export default function RoomPage() {
   };
 
   const createPeerConnection = (targetUserId, isInitiator) => {
-    if (peerConnectionsRef.current[targetUserId]) return peerConnectionsRef.current[targetUserId];
+    if (peerConnectionsRef.current[targetUserId] && peerConnectionsRef.current[targetUserId].signalingState !== 'closed') {
+      return peerConnectionsRef.current[targetUserId];
+    }
 
     const pc = new RTCPeerConnection({
       iceServers: [
@@ -781,7 +820,7 @@ export default function RoomPage() {
             signal: { type: 'offer', offer: offer }
           }));
         }
-      });
+      }).catch(err => console.error('Error creating SDP offer:', err));
     }
 
     peerConnectionsRef.current[targetUserId] = pc;
@@ -793,9 +832,9 @@ export default function RoomPage() {
 
     if (signal.type === 'offer') {
       // Only process answer if local user is in the call
-      if (!isInCall || !localStreamRef.current) return;
+      if (!isInCallRef.current || !localStreamRef.current) return;
 
-      if (!pc) {
+      if (!pc || pc.signalingState === 'closed') {
         pc = createPeerConnection(senderUserId, false);
       }
 
@@ -813,12 +852,12 @@ export default function RoomPage() {
         }));
       }
     } else if (signal.type === 'answer') {
-      if (pc) {
+      if (pc && pc.signalingState !== 'closed') {
         await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
         await flushPendingIceCandidates(pc, senderUserId);
       }
     } else if (signal.type === 'candidate') {
-      if (pc) {
+      if (pc && pc.signalingState !== 'closed') {
         await addIceCandidateSafely(pc, senderUserId, signal.candidate);
       } else {
         if (!pendingIceCandidatesRef.current[senderUserId]) {
@@ -855,9 +894,6 @@ export default function RoomPage() {
           const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
           const newTrack = videoStream.getVideoTracks()[0];
           localStreamRef.current.addTrack(newTrack);
-          Object.values(peerConnectionsRef.current).forEach(pc => {
-            pc.addTrack(newTrack, localStreamRef.current);
-          });
           setIsVideoOn(true);
         } catch (e) {
           alert('Could not enable camera: ' + e.message);
@@ -1426,14 +1462,32 @@ export default function RoomPage() {
           ref={el => {
             if (el && el.srcObject !== stream) {
               el.srcObject = stream;
+              el.play().catch(err => console.warn('Audio play trigger warning:', err));
             }
           }}
         />
       ))}
 
       {/* WebRTC Video Call Floating Overlay */}
-      {isInCall && isVideoOn && Object.keys(remoteStreams).length > 0 && (
+      {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current)) && (
         <div className="webrtc-video-grid">
+          {/* Local Camera Preview */}
+          {isVideoOn && localStreamRef.current && (
+            <div className="webrtc-video-card local-video-card">
+              <video
+                autoPlay
+                playsInline
+                muted
+                ref={el => {
+                  if (el && el.srcObject !== localStreamRef.current) {
+                    el.srcObject = localStreamRef.current;
+                  }
+                }}
+              />
+              <span className="webrtc-peer-name">You (Camera)</span>
+            </div>
+          )}
+          {/* Remote Video Cards */}
           {Object.entries(remoteStreams).map(([peerId, stream]) => {
             const peerUser = users.find(u => u.id === peerId);
             return (
@@ -1441,10 +1495,10 @@ export default function RoomPage() {
                 <video 
                   autoPlay 
                   playsInline 
-                  muted
                   ref={el => {
                     if (el && el.srcObject !== stream) {
                       el.srcObject = stream;
+                      el.play().catch(err => console.warn('Video play trigger warning:', err));
                     }
                   }} 
                 />
