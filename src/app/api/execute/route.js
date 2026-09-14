@@ -1,18 +1,19 @@
 import { NextResponse } from 'next/server';
 
-const LANGUAGE_PISTON_MAP = {
-  'javascript': { language: 'javascript', version: '18.15.0' },
-  'typescript': { language: 'typescript', version: '5.0.3' },
-  'python': { language: 'python', version: '3.10.0' },
-  'cpp': { language: 'c++', version: '10.2.0' },
-  'c': { language: 'c', version: '10.2.0' },
-  'java': { language: 'java', version: '15.0.2' },
-  'go': { language: 'go', version: '1.16.2' },
-  'rust': { language: 'rust', version: '1.68.2' },
-  'php': { language: 'php', version: '8.2.3' },
-  'ruby': { language: 'ruby', version: '3.0.1' },
-  'sql': { language: 'sqlite3', version: '3.36.0' },
-  'shell': { language: 'bash', version: '5.2.0' }
+const LANGUAGE_JUDGE0_MAP = {
+  'javascript': 63,  // Node.js
+  'typescript': 74,  // TypeScript
+  'python': 71,      // Python 3
+  'cpp': 54,         // C++ (GCC 9.2.0)
+  'c': 50,           // C (GCC 9.2.0)
+  'java': 62,        // Java (OpenJDK 13.0.1)
+  'go': 60,          // Go (1.13.5)
+  'rust': 73,        // Rust (1.40.0)
+  'sql': 82,         // SQLite 3
+  'shell': 46,       // Bash 5.0
+  'html': 63,
+  'css': 63,
+  'markdown': 63
 };
 
 export async function POST(request) {
@@ -28,24 +29,18 @@ export async function POST(request) {
     }
 
     const normalizedLang = language.toLowerCase();
-    const config = LANGUAGE_PISTON_MAP[normalizedLang] || LANGUAGE_PISTON_MAP['javascript'];
+    const languageId = LANGUAGE_JUDGE0_MAP[normalizedLang] || 63;
 
     const startTime = Date.now();
 
-    const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+    const response = await fetch('https://ce.judge0.com/submissions?wait=true', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        language: config.language,
-        version: config.version,
-        files: [
-          {
-            name: filename,
-            content: code
-          }
-        ]
+        source_code: code,
+        language_id: languageId
       })
     });
 
@@ -62,18 +57,18 @@ export async function POST(request) {
 
     const result = await response.json();
 
-    const run = result.run || {};
-    const stdout = run.stdout || '';
-    const stderr = run.stderr || '';
-    const output = run.output || (stdout + stderr);
+    const stdout = result.stdout || '';
+    const stderr = result.stderr || result.compile_output || result.message || '';
+    const output = stdout || stderr || 'Code executed successfully with no output returned.';
+    const statusDesc = result.status?.description || 'Executed';
 
     return NextResponse.json({
       output: output,
       stdout: stdout,
       stderr: stderr,
-      code: run.code,
-      signal: run.signal,
-      executionTime
+      code: result.status?.id === 3 ? 0 : 1,
+      status: statusDesc,
+      executionTime: Math.round(parseFloat(result.time || 0) * 1000) || executionTime
     });
 
   } catch (error) {
