@@ -1631,9 +1631,10 @@ select:focus {
 .input-picker-btn {
   background: none;
   border: none;
+  color: var(--text-color, #e2e8f0);
   cursor: pointer;
-  opacity: 0.75;
-  transition: opacity 0.2s, transform 0.1s;
+  opacity: 0.9;
+  transition: opacity 0.2s, transform 0.1s, background 0.15s, border-color 0.15s, color 0.15s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1641,12 +1642,24 @@ select:focus {
 
 .input-picker-btn:hover {
   opacity: 1;
-  transform: scale(1.08);
+  transform: scale(1.05);
 }
 
 .input-picker-btn.emoji-btn {
-  font-size: 1.15rem;
-  padding: 2px 4px;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 6px;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+}
+
+.input-picker-btn.emoji-btn:hover,
+.input-picker-btn.emoji-btn.active {
+  color: #f59e0b;
+  background: rgba(251, 191, 36, 0.2);
+  border-color: rgba(251, 191, 36, 0.45);
 }
 
 .input-picker-btn.gif-btn {
@@ -1658,7 +1671,13 @@ select:focus {
   background: rgba(79, 142, 247, 0.1);
   border: 1px solid rgba(79, 142, 247, 0.25);
   border-radius: 6px;
-  height: 22px;
+  height: 24px;
+}
+
+.input-picker-btn.gif-btn:hover,
+.input-picker-btn.gif-btn.active {
+  background: rgba(79, 142, 247, 0.22);
+  border-color: var(--primary-color);
 }
 
 .chat-input-area input {

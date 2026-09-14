@@ -2794,10 +2794,23 @@ export default function RoomPage() {
               )}
 
               <div className="chat-input-area">
-                <button className="input-picker-btn emoji-btn" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} title="Add Emoji" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Smile size={18} />
+                <button 
+                  type="button"
+                  className={`input-picker-btn emoji-btn ${showEmojiPicker ? 'active' : ''}`} 
+                  onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} 
+                  title="Add Emoji" 
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Smile size={16} />
                 </button>
-                <button className="input-picker-btn gif-btn" onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); if (!gifs.length) loadDefaultGifs(); }} title="Share GIF">GIF</button>
+                <button 
+                  type="button"
+                  className={`input-picker-btn gif-btn ${showGifPicker ? 'active' : ''}`} 
+                  onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); if (!gifs.length) loadDefaultGifs(); }} 
+                  title="Share GIF"
+                >
+                  GIF
+                </button>
                 
                 <input
                   type="text"
