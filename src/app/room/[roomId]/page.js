@@ -50,7 +50,6 @@ function getCodeMirrorMode(languageId) {
   return item ? item.mode : 'javascript';
 }
 
-// Simple diff helper to generate highlighted code comparison lines
 function generateSimpleDiff(oldText = '', newText = '') {
   const oldLines = oldText.split('\n');
   const newLines = newText.split('\n');
@@ -108,10 +107,11 @@ export default function RoomPage() {
   const [selectedSnapshot, setSelectedSnapshot] = useState(null);
 
   // WebRTC Call States
+  const [callActiveUsers, setCallActiveUsers] = useState([]);
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(false);
-  const [remoteStreams, setRemoteStreams] = useState({}); // userId -> MediaStream
+  const [remoteStreams, setRemoteStreams] = useState({});
 
   // Code Execution States
   const [isRunningCode, setIsRunningCode] = useState(false);
@@ -160,8 +160,9 @@ export default function RoomPage() {
 
   const activeFileRef = useRef('index.js');
   const filesRef = useRef(files);
-  const peerConnectionsRef = useRef({}); // userId -> RTCPeerConnection
+  const peerConnectionsRef = useRef({});
   const localStreamRef = useRef(null);
+  const pendingIceCandidatesRef = useRef({});
 
   useEffect(() => {
     activeFileRef.current = activeFile;
@@ -250,6 +251,7 @@ export default function RoomPage() {
               setHostName(data.hostName || 'Host');
               setIsPresenterMode(!!data.isPresenterMode);
               if (data.snapshots) setSnapshots(data.snapshots);
+              if (data.callActiveUsers) setCallActiveUsers(data.callActiveUsers);
 
               if (data.files && Object.keys(data.files).length > 0) {
                 setFiles(data.files);
@@ -287,6 +289,16 @@ export default function RoomPage() {
               setAuthError('');
               setIsRoomLocked(!!data.isLocked);
               addActivityLog(`✨ Joined room "${roomId}" as "${nicknameRef.current}"`);
+              break;
+            }
+
+            case 'call-status-update': {
+              setCallActiveUsers(data.callActiveUsers || []);
+              if (data.joinedUserName) {
+                showToast(`🎙️ ${data.joinedUserName} joined the voice call!`, 'join');
+              } else if (data.leftUserName) {
+                showToast(`📞 ${data.leftUserName} left the call.`, 'leave');
+              }
               break;
             }
 
@@ -651,8 +663,6 @@ export default function RoomPage() {
     }
   };
 
-  const pendingIceCandidatesRef = useRef({}); // userId -> Array of ICE candidates
-
   // WebRTC Audio / Video Call Handlers
   const addIceCandidateSafely = async (pc, targetUserId, candidate) => {
     if (pc.remoteDescription && pc.remoteDescription.type) {
@@ -695,7 +705,11 @@ export default function RoomPage() {
       setIsInCall(false);
       setIsVideoOn(false);
       setIsMuted(false);
-      showToast('📞 Left the voice/video call.', 'leave');
+
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: 'leave-call' }));
+      }
+      showToast('📞 Left the voice call.', 'leave');
       return;
     }
 
@@ -705,10 +719,14 @@ export default function RoomPage() {
       setIsInCall(true);
       showToast('🎙️ Joined voice call!', 'join');
 
-      // Initiate WebRTC peer connections with all other existing room users
-      users.forEach(u => {
-        if (u.id !== myUserIdRef.current) {
-          createPeerConnection(u.id, true);
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: 'join-call' }));
+      }
+
+      // Initiate WebRTC peer connections with all current active call participants
+      callActiveUsers.forEach(targetId => {
+        if (targetId !== myUserIdRef.current) {
+          createPeerConnection(targetId, true);
         }
       });
     } catch (err) {
@@ -774,16 +792,8 @@ export default function RoomPage() {
     let pc = peerConnectionsRef.current[senderUserId];
 
     if (signal.type === 'offer') {
-      if (!localStreamRef.current) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoOn });
-          localStreamRef.current = stream;
-          setIsInCall(true);
-          showToast('🎙️ Connected to voice call!', 'join');
-        } catch (e) {
-          console.error('Could not acquire local stream for incoming call:', e);
-        }
-      }
+      // Only process answer if local user is in the call
+      if (!isInCall || !localStreamRef.current) return;
 
       if (!pc) {
         pc = createPeerConnection(senderUserId, false);
@@ -1301,11 +1311,11 @@ export default function RoomPage() {
             {/* WebRTC Audio / Video Call Controls */}
             <div className="webrtc-call-bar">
               <button 
-                className={`header-btn ${isInCall ? 'call-btn-active' : ''}`}
+                className={`header-btn ${isInCall ? 'call-btn-active' : callActiveUsers.length > 0 ? 'run-code-btn' : ''}`}
                 onClick={handleToggleCall} 
-                title={isInCall ? "Leave Call" : "Start Voice Call"}
+                title={isInCall ? "Leave Call" : callActiveUsers.length > 0 ? "Join Ongoing Call" : "Start Voice Call"}
               >
-                <span>{isInCall ? '📞 End Call' : '🎙️ Call'}</span>
+                <span>{isInCall ? '❌ Leave Call' : callActiveUsers.length > 0 ? `📞 Join Call (${callActiveUsers.length} Active)` : '🎙️ Start Call'}</span>
               </button>
               {isInCall && (
                 <>

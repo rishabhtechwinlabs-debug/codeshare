@@ -11,7 +11,6 @@ const handle = app.getRequestHandler();
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://rishabhtechwinlabs:YgKy6jhAk0rrQdZo@cluster0.uufayrt.mongodb.net/hivecode?retryWrites=true&w=majority';
 
-// Mongoose Connection Setup
 let isDbConnected = false;
 async function initMongoDB() {
   if (isDbConnected) return;
@@ -25,7 +24,6 @@ async function initMongoDB() {
 }
 initMongoDB();
 
-// Mongoose Schemas & Models (CommonJS compatible for server.js)
 const SnapshotSchema = new mongoose.Schema({
   id: String,
   timestamp: String,
@@ -62,7 +60,6 @@ const MessageSchema = new mongoose.Schema({
 const RoomModel = mongoose.models.Room || mongoose.model('Room', RoomSchema);
 const MessageModel = mongoose.models.Message || mongoose.model('Message', MessageSchema);
 
-// Map of roomId -> { files: object, users: Map, messages: Array, typingUsers: Map, password: string|null, theme: string, hostUserId: string, isPresenterMode: boolean, snapshots: Array }
 const rooms = new Map();
 const fileSaveDebounceTimers = new Map();
 
@@ -128,7 +125,8 @@ async function getOrLoadRoom(roomId) {
     password: null,
     hostUserId: null,
     isPresenterMode: false,
-    snapshots: []
+    snapshots: [],
+    callActiveUsers: new Set()
   };
 
   try {
@@ -367,6 +365,7 @@ app.prepare().then(() => {
               hostName: hostUser ? hostUser.name : 'Host',
               isPresenterMode: room.isPresenterMode,
               snapshots: room.snapshots || [],
+              callActiveUsers: Array.from(room.callActiveUsers || []),
               users: getUserList(roomId),
               messages: room.messages,
               typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name })),
@@ -379,6 +378,39 @@ app.prepare().then(() => {
               users: getUserList(roomId)
             }, ws);
 
+            break;
+          }
+
+          case 'join-call': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              room.callActiveUsers.add(userId);
+              const user = room.users.get(ws);
+
+              // Notify everyone in the room of updated call participants
+              broadcastToRoom(currentRoomId, {
+                type: 'call-status-update',
+                callActiveUsers: Array.from(room.callActiveUsers),
+                joinedUserName: user ? user.name : 'User'
+              });
+            }
+            break;
+          }
+
+          case 'leave-call': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room && room.callActiveUsers.has(userId)) {
+              room.callActiveUsers.delete(userId);
+              const user = room.users.get(ws);
+
+              broadcastToRoom(currentRoomId, {
+                type: 'call-status-update',
+                callActiveUsers: Array.from(room.callActiveUsers),
+                leftUserName: user ? user.name : 'User'
+              });
+            }
             break;
           }
 
@@ -759,6 +791,13 @@ app.prepare().then(() => {
           room.users.delete(ws);
           if (userId) {
             room.typingUsers.delete(userId);
+            if (room.callActiveUsers) {
+              room.callActiveUsers.delete(userId);
+              broadcastToRoom(currentRoomId, {
+                type: 'call-status-update',
+                callActiveUsers: Array.from(room.callActiveUsers)
+              });
+            }
           }
         }
 
