@@ -448,7 +448,7 @@ export default function RoomPage() {
   }, [isDragging]);
 
   const handleReact = (messageId, emoji) => {
-    if (!socketRef.current || socketRef.current.readyState !== 1) return;
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
     socketRef.current.send(JSON.stringify({
       type: 'chat-reaction',
       messageId,
@@ -570,7 +570,7 @@ export default function RoomPage() {
   const handleSendChat = (customText = null, isGif = false) => {
     const textObj = customText !== null ? customText : chatInput;
     const text = typeof textObj === 'string' ? textObj.trim() : '';
-    if (!text || !socketRef.current || socketRef.current.readyState !== 1) return;
+    if (!text || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
 
     socketRef.current.send(JSON.stringify({
       type: 'chat-message',
@@ -588,14 +588,17 @@ export default function RoomPage() {
 
   const handleAuthSubmit = (e) => {
     if (e) e.preventDefault();
-    if (!authPassword.trim()) return;
+    const pw = authPassword.trim();
+    if (!pw) return;
 
-    if (socketRef.current && socketRef.current.readyState === 1) {
+    sessionStorage.setItem('room_pw_' + roomId, pw);
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'join',
         roomId: roomId,
         nickname: nickname,
-        password: authPassword
+        password: pw
       }));
     }
   };
@@ -604,7 +607,7 @@ export default function RoomPage() {
     if (e) e.preventDefault();
     if (!newRoomPassword.trim()) return;
 
-    if (socketRef.current && socketRef.current.readyState === 1) {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'set-room-password',
         password: newRoomPassword
@@ -616,7 +619,7 @@ export default function RoomPage() {
   };
 
   const handleRemoveLock = () => {
-    if (socketRef.current && socketRef.current.readyState === 1) {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'remove-room-password'
       }));
