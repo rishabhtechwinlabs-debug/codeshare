@@ -122,8 +122,11 @@ export default function RoomPage() {
   const [videoInputDevices, setVideoInputDevices] = useState([]);
   const [selectedAudioDevice, setSelectedAudioDevice] = useState('');
   const [selectedVideoDevice, setSelectedVideoDevice] = useState('');
+  const [peerConnectionStates, setPeerConnectionStates] = useState({});
 
   const screenStreamRef = useRef(null);
+  const audioElementsRef = useRef({});
+  const activeCallUsersRef = useRef([]);
 
   // Code Execution States
   const [isRunningCode, setIsRunningCode] = useState(false);
@@ -268,7 +271,10 @@ export default function RoomPage() {
               setHostName(data.hostName || 'Host');
               setIsPresenterMode(!!data.isPresenterMode);
               if (data.snapshots) setSnapshots(data.snapshots);
-              if (data.callActiveUsers) setCallActiveUsers(data.callActiveUsers);
+              if (data.callActiveUsers) {
+                activeCallUsersRef.current = data.callActiveUsers;
+                setCallActiveUsers(data.callActiveUsers);
+              }
 
               if (data.files && Object.keys(data.files).length > 0) {
                 setFiles(data.files);
@@ -311,14 +317,20 @@ export default function RoomPage() {
 
             case 'call-status-update': {
               const newActiveUsers = data.callActiveUsers || [];
+              activeCallUsersRef.current = newActiveUsers;
               setCallActiveUsers(newActiveUsers);
 
-              // Clean up peer connections and streams for users who left the call
+              // 1. Clean up peer connections, audio elements, and streams for users who left
               Object.keys(peerConnectionsRef.current).forEach(peerId => {
                 if (!newActiveUsers.includes(peerId)) {
                   if (peerConnectionsRef.current[peerId]) {
                     peerConnectionsRef.current[peerId].close();
                     delete peerConnectionsRef.current[peerId];
+                  }
+                  if (audioElementsRef.current[peerId]) {
+                    audioElementsRef.current[peerId].pause();
+                    audioElementsRef.current[peerId].srcObject = null;
+                    delete audioElementsRef.current[peerId];
                   }
                   delete pendingIceCandidatesRef.current[peerId];
                   setRemoteStreams(prev => {
@@ -326,8 +338,23 @@ export default function RoomPage() {
                     delete next[peerId];
                     return next;
                   });
+                  setPeerConnectionStates(prev => {
+                    const next = { ...prev };
+                    delete next[peerId];
+                    return next;
+                  });
                 }
               });
+
+              // 2. Deterministically initiate peer connections to any newly joined call participants
+              if (isInCallRef.current && localStreamRef.current) {
+                newActiveUsers.forEach(peerId => {
+                  if (peerId !== myUserIdRef.current && !peerConnectionsRef.current[peerId]) {
+                    const shouldInitiate = myUserIdRef.current < peerId;
+                    createPeerConnection(peerId, shouldInitiate);
+                  }
+                });
+              }
 
               if (data.joinedUserName) {
                 showToast(`🎙️ ${data.joinedUserName} joined the voice call!`, 'join');
@@ -837,15 +864,27 @@ export default function RoomPage() {
 
   const handleToggleCall = async () => {
     if (isInCall) {
-      // Leave call
+      // Leave call: clean up local stream
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
         localStreamRef.current = null;
       }
+      // Close all peer connections
       Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
       peerConnectionsRef.current = {};
       pendingIceCandidatesRef.current = {};
+
+      // Stop and clean up all persistent consumer audio elements
+      Object.values(audioElementsRef.current).forEach(audio => {
+        try {
+          audio.pause();
+          audio.srcObject = null;
+        } catch (e) {}
+      });
+      audioElementsRef.current = {};
+
       setRemoteStreams({});
+      setPeerConnectionStates({});
       setIsInCall(false);
       isInCallRef.current = false;
       setIsVideoOn(false);
@@ -858,7 +897,7 @@ export default function RoomPage() {
       return;
     }
 
-    // Resume AudioContext on user gesture to unlock browser audio autoplay
+    // Producer: Resume AudioContext on user gesture to unlock browser audio autoplay
     if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -870,18 +909,31 @@ export default function RoomPage() {
     try {
       let stream = null;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
+          video: true
+        });
         if (!isVideoOn) {
           const vt = stream.getVideoTracks()[0];
           if (vt) vt.enabled = false;
         }
       } catch (e) {
         // Fallback to audio-only if camera is unavailable or permission denied
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
         setIsVideoOn(false);
       }
 
-      // Ensure audio track is enabled
+      // Producer: Ensure audio track is enabled
       const at = stream.getAudioTracks()[0];
       if (at) at.enabled = true;
 
@@ -895,13 +947,20 @@ export default function RoomPage() {
         socketRef.current.send(JSON.stringify({ type: 'join-call' }));
       }
 
-      // Initiate WebRTC peer connections with all current active call participants
-      callActiveUsers.forEach(targetId => {
+      // Connect with all active participants using ref to avoid React state closure stale data
+      const activePeers = activeCallUsersRef.current && activeCallUsersRef.current.length > 0
+        ? activeCallUsersRef.current
+        : callActiveUsers;
+
+      activePeers.forEach(targetId => {
         if (targetId !== myUserIdRef.current) {
-          createPeerConnection(targetId, true);
+          // Deterministic initiator: lower userId initiates
+          const shouldInitiate = myUserIdRef.current < targetId;
+          createPeerConnection(targetId, shouldInitiate);
         }
       });
     } catch (err) {
+      console.error('getUserMedia error:', err);
       alert('Could not access microphone/camera: ' + err.message);
     }
   };
@@ -916,7 +975,10 @@ export default function RoomPage() {
     pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:openrelay.metered.ca:80' }
       ],
       iceCandidatePoolSize: 10,
       bundlePolicy: 'max-bundle',
@@ -924,6 +986,17 @@ export default function RoomPage() {
     });
 
     ensureLocalTracksOnPeerConnection(pc);
+
+    // Track WebRTC connection lifecycle states
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: state }));
+      if (state === 'failed') {
+        try {
+          pc.restartIce();
+        } catch (e) {}
+      }
+    };
 
     pc.onicecandidate = (event) => {
       if (event.candidate && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -936,25 +1009,58 @@ export default function RoomPage() {
     };
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed') {
-        pc.restartIce();
-        pc.createOffer({ iceRestart: true }).then(offer => {
-          pc.setLocalDescription(offer);
-          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({
-              type: 'webrtc-signal',
-              targetUserId: targetUserId,
-              signal: { type: 'offer', offer: offer }
-            }));
-          }
-        }).catch(err => console.error('Error restarting ICE:', err));
+      const iceState = pc.iceConnectionState;
+      if (iceState === 'failed') {
+        try {
+          pc.restartIce();
+          pc.createOffer({ iceRestart: true }).then(offer => {
+            pc.setLocalDescription(offer);
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({
+                type: 'webrtc-signal',
+                targetUserId: targetUserId,
+                signal: { type: 'offer', offer: offer }
+              }));
+            }
+          }).catch(err => console.error('Error restarting ICE:', err));
+        } catch (e) {}
       }
     };
 
+    // Consumer: Ingest incoming audio & video tracks
     pc.ontrack = (event) => {
       if (event.track) {
         event.track.enabled = true;
       }
+
+      // 1. Consumer Audio Pipeline: Persistent HTMLAudioElement (Immune to React re-renders)
+      let audioTrack = null;
+      if (event.track && event.track.kind === 'audio') {
+        audioTrack = event.track;
+      } else if (event.streams && event.streams[0]) {
+        audioTrack = event.streams[0].getAudioTracks()[0];
+      }
+
+      if (audioTrack) {
+        let audioEl = audioElementsRef.current[targetUserId];
+        if (!audioEl) {
+          audioEl = new Audio();
+          audioEl.autoplay = true;
+          audioEl.playsInline = true;
+          audioEl.muted = false;
+          audioEl.volume = 1.0;
+          audioElementsRef.current[targetUserId] = audioEl;
+        }
+        const audioStream = new MediaStream([audioTrack]);
+        if (audioEl.srcObject !== audioStream) {
+          audioEl.srcObject = audioStream;
+        }
+        audioEl.play().catch(e => {
+          console.warn('Audio autoplay requires user interaction:', e);
+        });
+      }
+
+      // 2. Video Track State for UI Video Cards
       const handleTrackUpdate = () => {
         if (event.streams && event.streams[0]) {
           const tracks = event.streams[0].getTracks();
@@ -1759,32 +1865,6 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* Background Audio Streams (Guarantees voice audio playback) */}
-      {Object.entries(remoteStreams).map(([peerId, stream]) => (
-        <audio
-          key={`audio-${peerId}`}
-          autoPlay
-          playsInline
-          onLoadedMetadata={(e) => {
-            if (e.target) {
-              e.target.muted = false;
-              e.target.volume = 1.0;
-              e.target.play().catch(err => console.warn('Audio metadata play trigger:', err));
-            }
-          }}
-          ref={el => {
-            if (el) {
-              if (el.srcObject !== stream) {
-                el.srcObject = stream;
-              }
-              el.muted = false;
-              el.volume = 1.0;
-              el.play().catch(err => console.warn('Audio play trigger warning:', err));
-            }
-          }}
-        />
-      ))}
-
       {/* WebRTC Video Call Floating Overlay */}
       {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current) || isScreenSharing) && (
         <div className="webrtc-video-grid">
@@ -1830,11 +1910,15 @@ export default function RoomPage() {
             const peerUser = users.find(u => u.id === peerId);
             const isPeerSpeaking = speakingUsers[peerId];
             const stats = connectionStats[peerId];
+            const connState = peerConnectionStates[peerId] || 'connected';
             return (
               <div key={peerId} className={`webrtc-video-card ${isPeerSpeaking ? 'is-speaking' : ''}`}>
                 {isPeerSpeaking && (
                   <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
                 )}
+                <span className={`webrtc-connection-badge badge-${connState}`}>
+                  {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
+                </span>
                 {stats && (
                   <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
                 )}
