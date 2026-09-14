@@ -131,10 +131,12 @@ export default function RoomPage() {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:staticauth.openrelay.metered.ca:80' }
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' }
   ]);
 
-  // Fetch dynamic HMAC-SHA1 WebRTC TURN servers
+  // Fetch dynamic WebRTC ICE configuration
   useEffect(() => {
     fetch('/api/turn')
       .then(res => res.json())
@@ -143,7 +145,7 @@ export default function RoomPage() {
           iceServersRef.current = data.iceServers;
         }
       })
-      .catch(e => console.warn('Could not load dynamic TURN config:', e));
+      .catch(e => console.warn('Could not load dynamic ICE config:', e));
   }, []);
 
   // Code Execution States
@@ -1010,12 +1012,23 @@ export default function RoomPage() {
 
     ensureLocalTracksOnPeerConnection(pc);
 
-    // Track WebRTC connection lifecycle states with non-destructive ICE restart
-    pc.onconnectionstatechange = () => {
-      const state = pc.connectionState;
-      setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: state }));
+    // Track WebRTC connection lifecycle states: mark connected if either DTLS or ICE succeeds
+    const updateConnState = () => {
+      const connState = pc.connectionState;
+      const iceState = pc.iceConnectionState;
+      if (connState === 'connected' || iceState === 'connected' || iceState === 'completed') {
+        setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'connected' }));
+      } else if (connState === 'failed' || iceState === 'failed') {
+        setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'failed' }));
+      } else if (connState === 'connecting' || iceState === 'checking') {
+        setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'connecting' }));
+      }
+    };
 
-      if (state === 'failed') {
+    pc.onconnectionstatechange = () => {
+      updateConnState();
+
+      if (pc.connectionState === 'failed') {
         console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed. Performing ICE restart...`);
         // Only initiator triggers ICE restart to avoid negotiation glare
         if (myUserIdRef.current < targetUserId) {
@@ -1055,11 +1068,21 @@ export default function RoomPage() {
     };
 
     pc.oniceconnectionstatechange = () => {
-      const iceState = pc.iceConnectionState;
-      if (iceState === 'failed') {
+      updateConnState();
+      if (pc.iceConnectionState === 'failed') {
         if (myUserIdRef.current < targetUserId) {
           try {
             pc.restartIce();
+            pc.createOffer({ iceRestart: true }).then(async (offer) => {
+              await pc.setLocalDescription(offer);
+              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                socketRef.current.send(JSON.stringify({
+                  type: 'webrtc-signal',
+                  targetUserId: targetUserId,
+                  signal: { type: 'offer', offer: pc.localDescription }
+                }));
+              }
+            }).catch(e => console.warn('[WebRTC] ICE restart offer error:', e));
           } catch (e) {}
         }
       }
