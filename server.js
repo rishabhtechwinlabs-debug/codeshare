@@ -10,9 +10,9 @@ const handle = app.getRequestHandler();
 
 const PORT = process.env.PORT || 3000;
 
-// Map of roomId -> { files: object, users: Map, messages: Array, typingUsers: Map, password: string|null, theme: string }
+// Map of roomId -> { files: object, users: Map, messages: Array, typingUsers: Map, password: string|null, theme: string, hostUserId: string, isPresenterMode: boolean, snapshots: Array }
 const rooms = new Map();
-const fileSaveDebounceTimers = new Map(); // roomId -> setTimeout handle
+const fileSaveDebounceTimers = new Map();
 
 function getRandomColor() {
   const colors = [
@@ -31,6 +31,19 @@ function broadcastToRoom(roomId, messageObj, excludeWs = null) {
   for (const clientWs of room.users.keys()) {
     if (clientWs !== excludeWs && clientWs.readyState === WebSocket.OPEN) {
       clientWs.send(rawMessage);
+    }
+  }
+}
+
+function sendToUser(roomId, targetUserId, messageObj) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  const rawMessage = JSON.stringify(messageObj);
+  for (const [ws, user] of room.users.entries()) {
+    if (user.id === targetUserId && ws.readyState === WebSocket.OPEN) {
+      ws.send(rawMessage);
+      break;
     }
   }
 }
@@ -60,7 +73,10 @@ async function getOrLoadRoom(roomId) {
     users: new Map(),
     messages: [],
     typingUsers: new Map(),
-    password: null
+    password: null,
+    hostUserId: null,
+    isPresenterMode: false,
+    snapshots: []
   };
 
   if (supabase) {
@@ -81,6 +97,9 @@ async function getOrLoadRoom(roomId) {
           };
         }
         roomData.password = dbRoom.password || null;
+        if (dbRoom.snapshots && Array.isArray(dbRoom.snapshots)) {
+          roomData.snapshots = dbRoom.snapshots;
+        }
 
         const { data: dbMessages } = await supabase
           .from('messages')
@@ -104,7 +123,7 @@ async function getOrLoadRoom(roomId) {
         }
       }
     } catch (err) {
-      // Supabase load fallback
+      // Supabase fallback
     }
   }
 
@@ -138,6 +157,19 @@ function scheduleFileSave(roomId, files) {
   }, 2000);
 
   fileSaveDebounceTimers.set(roomId, timer);
+}
+
+async function saveSnapshotsToDB(roomId, snapshots) {
+  if (!supabase) return;
+  try {
+    await supabase.from('rooms').upsert({
+      id: roomId,
+      snapshots: snapshots,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'id' });
+  } catch (err) {
+    console.error('Error saving snapshots to Supabase:', err.message);
+  }
 }
 
 async function saveMessageToDB(roomId, msgObj) {
@@ -200,7 +232,8 @@ app.prepare().then(() => {
       const activeRooms = Array.from(rooms.entries()).map(([id, room]) => ({
         id,
         userCount: room.users.size,
-        isLocked: !!room.password
+        isLocked: !!room.password,
+        isPresenterMode: room.isPresenterMode
       }));
       res.end(JSON.stringify({ rooms: activeRooms }));
       return;
@@ -270,12 +303,23 @@ app.prepare().then(() => {
 
             room.users.set(ws, userObj);
 
+            if (!room.hostUserId || room.users.size === 1) {
+              room.hostUserId = userId;
+            }
+
+            const hostUser = Array.from(room.users.values()).find(u => u.id === room.hostUserId);
+
             ws.send(JSON.stringify({
               type: 'init',
               files: room.files,
               activeFile: room.activeFile || Object.keys(room.files)[0],
               theme: room.theme || 'dracula',
               userId: userId,
+              isHost: userId === room.hostUserId,
+              hostUserId: room.hostUserId,
+              hostName: hostUser ? hostUser.name : 'Host',
+              isPresenterMode: room.isPresenterMode,
+              snapshots: room.snapshots || [],
               users: getUserList(roomId),
               messages: room.messages,
               typingUsers: Array.from(room.typingUsers.entries()).map(([id, name]) => ({ id, name })),
@@ -295,6 +339,9 @@ app.prepare().then(() => {
             if (!currentRoomId || typeof data.code !== 'string' || data.code.length > 500000) return;
             const room = rooms.get(currentRoomId);
             if (room) {
+              // Enforce presenter mode lock for non-hosts
+              if (room.isPresenterMode && userId !== room.hostUserId) return;
+
               const filename = data.filename || room.activeFile || 'index.js';
               if (!room.files[filename]) {
                 room.files[filename] = { content: '', language: 'javascript' };
@@ -312,10 +359,88 @@ app.prepare().then(() => {
             break;
           }
 
+          case 'toggle-presenter-mode': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room && userId === room.hostUserId) {
+              room.isPresenterMode = !!data.isPresenterMode;
+              const hostUser = room.users.get(ws);
+              broadcastToRoom(currentRoomId, {
+                type: 'presenter-mode-update',
+                isPresenterMode: room.isPresenterMode,
+                hostName: hostUser ? hostUser.name : 'Host'
+              });
+            }
+            break;
+          }
+
+          case 'create-snapshot': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              const user = room.users.get(ws);
+              const snapshotObj = {
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                filename: data.filename || room.activeFile,
+                code: data.code || room.files[data.filename || room.activeFile]?.content || '',
+                author: user ? user.name : 'System',
+                note: data.note || 'Manual version snapshot'
+              };
+
+              room.snapshots.unshift(snapshotObj);
+              if (room.snapshots.length > 50) room.snapshots.pop();
+              saveSnapshotsToDB(currentRoomId, room.snapshots);
+
+              broadcastToRoom(currentRoomId, {
+                type: 'snapshot-created',
+                snapshot: snapshotObj,
+                snapshots: room.snapshots
+              });
+            }
+            break;
+          }
+
+          case 'restore-snapshot': {
+            if (!currentRoomId) return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              if (room.isPresenterMode && userId !== room.hostUserId) return;
+
+              const filename = data.filename || room.activeFile;
+              if (room.files[filename]) {
+                room.files[filename].content = data.code;
+                scheduleFileSave(currentRoomId, room.files);
+
+                broadcastToRoom(currentRoomId, {
+                  type: 'code-update',
+                  filename: filename,
+                  code: data.code,
+                  userId: userId
+                });
+              }
+            }
+            break;
+          }
+
+          case 'webrtc-signal': {
+            if (!currentRoomId || !data.targetUserId) return;
+            const user = rooms.get(currentRoomId)?.users.get(ws);
+            sendToUser(currentRoomId, data.targetUserId, {
+              type: 'webrtc-signal',
+              senderUserId: userId,
+              senderName: user ? user.name : 'Peer',
+              signal: data.signal
+            });
+            break;
+          }
+
           case 'file-create': {
             if (!currentRoomId || typeof data.filename !== 'string') return;
             const room = rooms.get(currentRoomId);
             if (room) {
+              if (room.isPresenterMode && userId !== room.hostUserId) return;
+
               const filename = data.filename.trim();
               if (filename && !room.files[filename]) {
                 room.files[filename] = {
@@ -341,6 +466,8 @@ app.prepare().then(() => {
             if (!currentRoomId || typeof data.filename !== 'string') return;
             const room = rooms.get(currentRoomId);
             if (room) {
+              if (room.isPresenterMode && userId !== room.hostUserId) return;
+
               const filename = data.filename.trim();
               if (room.files[filename] && Object.keys(room.files).length > 1) {
                 delete room.files[filename];
@@ -364,6 +491,8 @@ app.prepare().then(() => {
             if (!currentRoomId || typeof data.oldFilename !== 'string' || typeof data.newFilename !== 'string') return;
             const room = rooms.get(currentRoomId);
             if (room) {
+              if (room.isPresenterMode && userId !== room.hostUserId) return;
+
               const oldName = data.oldFilename.trim();
               const newName = data.newFilename.trim();
               if (oldName && newName && room.files[oldName] && !room.files[newName]) {
@@ -585,6 +714,17 @@ app.prepare().then(() => {
           if (userId) {
             room.typingUsers.delete(userId);
           }
+        }
+
+        // Reassign host if host left
+        if (room.hostUserId === userId && room.users.size > 0) {
+          const nextHost = Array.from(room.users.values())[0];
+          room.hostUserId = nextHost.id;
+          broadcastToRoom(currentRoomId, {
+            type: 'host-reassigned',
+            newHostUserId: nextHost.id,
+            newHostName: nextHost.name
+          });
         }
 
         if (room.users.size === 0) {

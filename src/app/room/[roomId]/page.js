@@ -50,6 +50,28 @@ function getCodeMirrorMode(languageId) {
   return item ? item.mode : 'javascript';
 }
 
+// Simple diff helper to generate highlighted code comparison lines
+function generateSimpleDiff(oldText = '', newText = '') {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const maxLen = Math.max(oldLines.length, newLines.length);
+  const diffLines = [];
+
+  for (let i = 0; i < maxLen; i++) {
+    const oldL = oldLines[i];
+    const newL = newLines[i];
+
+    if (oldL === newL) {
+      if (newL !== undefined) diffLines.push({ type: 'normal', text: `  ${newL}` });
+    } else {
+      if (oldL !== undefined) diffLines.push({ type: 'removed', text: `- ${oldL}` });
+      if (newL !== undefined) diffLines.push({ type: 'added', text: `+ ${newL}` });
+    }
+  }
+
+  return diffLines;
+}
+
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
@@ -74,6 +96,22 @@ export default function RoomPage() {
   const [openTabs, setOpenTabs] = useState(['index.js']);
   const [showFileExplorer, setShowFileExplorer] = useState(true);
   const [editorTheme, setEditorTheme] = useState('dracula');
+
+  // Presenter Mode States
+  const [isHost, setIsHost] = useState(false);
+  const [hostName, setHostName] = useState('');
+  const [isPresenterMode, setIsPresenterMode] = useState(false);
+
+  // Version History States
+  const [snapshots, setSnapshots] = useState([]);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [selectedSnapshot, setSelectedSnapshot] = useState(null);
+
+  // WebRTC Call States
+  const [isInCall, setIsInCall] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOn, setIsVideoOn] = useState(false);
+  const [remoteStreams, setRemoteStreams] = useState({}); // userId -> MediaStream
 
   // Code Execution States
   const [isRunningCode, setIsRunningCode] = useState(false);
@@ -107,13 +145,12 @@ export default function RoomPage() {
   const [showLockModal, setShowLockModal] = useState(false);
   const [newRoomPassword, setNewRoomPassword] = useState('');
 
-  // Refs for tracking typing status
+  // Refs for tracking mutable states inside listeners
   const isTypingRef = useRef(false);
   const typingTimeoutRef = useRef(null);
   const gifCacheRef = useRef({});
   const gifDebounceTimeoutRef = useRef(null);
 
-  // Refs for tracking mutable states inside listeners
   const editorRef = useRef(null);
   const socketRef = useRef(null);
   const myUserIdRef = useRef(null);
@@ -123,6 +160,8 @@ export default function RoomPage() {
 
   const activeFileRef = useRef('index.js');
   const filesRef = useRef(files);
+  const peerConnectionsRef = useRef({}); // userId -> RTCPeerConnection
+  const localStreamRef = useRef(null);
 
   useEffect(() => {
     activeFileRef.current = activeFile;
@@ -199,7 +238,7 @@ export default function RoomPage() {
         }));
       };
 
-      socket.onmessage = (event) => {
+      socket.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
           const editor = editorRef.current;
@@ -207,6 +246,11 @@ export default function RoomPage() {
           switch (data.type) {
             case 'init': {
               myUserIdRef.current = data.userId;
+              setIsHost(!!data.isHost);
+              setHostName(data.hostName || 'Host');
+              setIsPresenterMode(!!data.isPresenterMode);
+              if (data.snapshots) setSnapshots(data.snapshots);
+
               if (data.files && Object.keys(data.files).length > 0) {
                 setFiles(data.files);
                 const firstFile = data.activeFile || Object.keys(data.files)[0];
@@ -217,6 +261,11 @@ export default function RoomPage() {
                   isRemoteChangeRef.current = true;
                   editor.setValue(data.files[firstFile]?.content || '');
                   editor.setOption('mode', getCodeMirrorMode(data.files[firstFile]?.language));
+                  if (data.isPresenterMode && !data.isHost) {
+                    editor.setOption('readOnly', 'nocursor');
+                  } else {
+                    editor.setOption('readOnly', false);
+                  }
                   isRemoteChangeRef.current = false;
                 }
               }
@@ -238,6 +287,29 @@ export default function RoomPage() {
               setAuthError('');
               setIsRoomLocked(!!data.isLocked);
               addActivityLog(`✨ Joined room "${roomId}" as "${nicknameRef.current}"`);
+              break;
+            }
+
+            case 'presenter-mode-update': {
+              setIsPresenterMode(data.isPresenterMode);
+              setHostName(data.hostName || 'Host');
+
+              if (editor) {
+                if (data.isPresenterMode && myUserIdRef.current !== data.hostUserId && !isHost) {
+                  editor.setOption('readOnly', 'nocursor');
+                } else {
+                  editor.setOption('readOnly', false);
+                }
+              }
+
+              showToast(data.isPresenterMode ? `🔒 Presenter Mode activated by ${data.hostName}` : `🔓 Presenter Mode disabled by ${data.hostName}`, 'join');
+              addActivityLog(data.isPresenterMode ? `🔒 Presenter Mode enabled` : `🔓 Presenter Mode disabled`);
+              break;
+            }
+
+            case 'snapshot-created': {
+              setSnapshots(data.snapshots);
+              addActivityLog(`📸 Version snapshot saved by ${data.snapshot.author}`);
               break;
             }
 
@@ -265,6 +337,11 @@ export default function RoomPage() {
                 editor.scrollTo(scrollInfo.left, scrollInfo.top);
                 isRemoteChangeRef.current = false;
               }
+              break;
+            }
+
+            case 'webrtc-signal': {
+              handleIncomingSignal(data.senderUserId, data.signal);
               break;
             }
 
@@ -363,6 +440,26 @@ export default function RoomPage() {
                 remoteCursorsRef.current.get(data.userId).clear();
                 remoteCursorsRef.current.delete(data.userId);
               }
+
+              if (peerConnectionsRef.current[data.userId]) {
+                peerConnectionsRef.current[data.userId].close();
+                delete peerConnectionsRef.current[data.userId];
+                setRemoteStreams(prev => {
+                  const copy = { ...prev };
+                  delete copy[data.userId];
+                  return copy;
+                });
+              }
+              break;
+            }
+
+            case 'host-reassigned': {
+              if (data.newHostUserId === myUserIdRef.current) {
+                setIsHost(true);
+                showToast('👑 You are now the Room Host!', 'join');
+              }
+              setHostName(data.newHostName);
+              addActivityLog(`👑 Host reassigned to "${data.newHostName}"`);
               break;
             }
 
@@ -494,6 +591,11 @@ export default function RoomPage() {
         if (bookmark && typeof bookmark.clear === 'function') bookmark.clear();
       });
       remoteCursorsRef.current.clear();
+
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
     };
   }, [nickname, roomId]);
 
@@ -507,6 +609,191 @@ export default function RoomPage() {
       }
     }
   }, [chatMessages]);
+
+  // Presenter Mode Toggle Handler
+  const handleTogglePresenterMode = () => {
+    if (!isHost || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+    socketRef.current.send(JSON.stringify({
+      type: 'toggle-presenter-mode',
+      isPresenterMode: !isPresenterMode
+    }));
+  };
+
+  // Save Version Snapshot Handler
+  const handleSaveSnapshot = () => {
+    const currentCode = editorRef.current ? editorRef.current.getValue() : files[activeFile]?.content;
+    const note = prompt('Enter a note for this version snapshot:', 'Version Checkpoint');
+    if (note === null) return;
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'create-snapshot',
+        filename: activeFile,
+        code: currentCode,
+        note: note || 'Version Checkpoint'
+      }));
+      showToast('📸 Version snapshot saved!', 'join');
+    }
+  };
+
+  // Restore Version Snapshot Handler
+  const handleRestoreSnapshot = (snapshot) => {
+    if (!confirm(`Restore version "${snapshot.note}" (${snapshot.timestamp})? Current code will be replaced.`)) return;
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'restore-snapshot',
+        filename: snapshot.filename,
+        code: snapshot.code
+      }));
+      setShowHistoryModal(false);
+      showToast(`↺ Restored version snapshot (${snapshot.timestamp})`, 'join');
+    }
+  };
+
+  // WebRTC Audio / Video Call Handlers
+  const handleToggleCall = async () => {
+    if (isInCall) {
+      // Leave call
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+      }
+      Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
+      peerConnectionsRef.current = {};
+      setRemoteStreams({});
+      setIsInCall(false);
+      setIsVideoOn(false);
+      setIsMuted(false);
+      showToast('📞 Left the voice/video call.', 'leave');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoOn });
+      localStreamRef.current = stream;
+      setIsInCall(true);
+      showToast('🎙️ Joined voice call!', 'join');
+
+      // Initiate WebRTC peer connections with all other existing room users
+      users.forEach(u => {
+        if (u.id !== myUserIdRef.current) {
+          createPeerConnection(u.id, true);
+        }
+      });
+    } catch (err) {
+      alert('Could not access microphone/camera: ' + err.message);
+    }
+  };
+
+  const createPeerConnection = (targetUserId, isInitiator) => {
+    if (peerConnectionsRef.current[targetUserId]) return peerConnectionsRef.current[targetUserId];
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current);
+      });
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'webrtc-signal',
+          targetUserId: targetUserId,
+          signal: { type: 'candidate', candidate: event.candidate }
+        }));
+      }
+    };
+
+    pc.ontrack = (event) => {
+      setRemoteStreams(prev => ({
+        ...prev,
+        [targetUserId]: event.streams[0]
+      }));
+    };
+
+    if (isInitiator) {
+      pc.createOffer().then(offer => {
+        pc.setLocalDescription(offer);
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({
+            type: 'webrtc-signal',
+            targetUserId: targetUserId,
+            signal: { type: 'offer', offer: offer }
+          }));
+        }
+      });
+    }
+
+    peerConnectionsRef.current[targetUserId] = pc;
+    return pc;
+  };
+
+  const handleIncomingSignal = async (senderUserId, signal) => {
+    let pc = peerConnectionsRef.current[senderUserId];
+
+    if (!pc) {
+      pc = createPeerConnection(senderUserId, false);
+    }
+
+    if (signal.type === 'offer') {
+      await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'webrtc-signal',
+          targetUserId: senderUserId,
+          signal: { type: 'answer', answer: answer }
+        }));
+      }
+    } else if (signal.type === 'answer') {
+      await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+    } else if (signal.type === 'candidate') {
+      await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+    }
+  };
+
+  const handleToggleMute = () => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = isMuted;
+        setIsMuted(!isMuted);
+      }
+    }
+  };
+
+  const handleToggleVideo = async () => {
+    if (!isInCall) {
+      setIsVideoOn(!isVideoOn);
+      return;
+    }
+
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !isVideoOn;
+        setIsVideoOn(!isVideoOn);
+      } else {
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const newTrack = videoStream.getVideoTracks()[0];
+          localStreamRef.current.addTrack(newTrack);
+          Object.values(peerConnectionsRef.current).forEach(pc => {
+            pc.addTrack(newTrack, localStreamRef.current);
+          });
+          setIsVideoOn(true);
+        } catch (e) {
+          alert('Could not enable camera: ' + e.message);
+        }
+      }
+    }
+  };
 
   // Handle Switch Active File
   const handleSwitchFile = (filename) => {
@@ -950,6 +1237,27 @@ export default function RoomPage() {
               <span>{isRunningCode ? '⏳ Running...' : '▶️ Run Code'}</span>
             </button>
 
+            {/* WebRTC Audio / Video Call Controls */}
+            <div className="webrtc-call-bar">
+              <button 
+                className={`header-btn ${isInCall ? 'call-btn-active' : ''}`}
+                onClick={handleToggleCall} 
+                title={isInCall ? "Leave Call" : "Start Voice Call"}
+              >
+                <span>{isInCall ? '📞 End Call' : '🎙️ Call'}</span>
+              </button>
+              {isInCall && (
+                <>
+                  <button className="header-btn" onClick={handleToggleMute} title={isMuted ? "Unmute Mic" : "Mute Mic"}>
+                    <span>{isMuted ? '🔇 Muted' : '🎙️ Mic On'}</span>
+                  </button>
+                  <button className="header-btn" onClick={handleToggleVideo} title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}>
+                    <span>{isVideoOn ? '📹 Cam On' : '📷 Cam Off'}</span>
+                  </button>
+                </>
+              )}
+            </div>
+
             {/* Language Selector */}
             <select 
               className="header-select"
@@ -974,9 +1282,28 @@ export default function RoomPage() {
               ))}
             </select>
 
+            {/* Host Presenter Mode Toggle */}
+            {isHost && (
+              <button 
+                className={`header-btn ${isPresenterMode ? 'lock-btn locked' : ''}`} 
+                onClick={handleTogglePresenterMode}
+                title={isPresenterMode ? "Disable Presenter Mode" : "Enable Presenter Mode (Lock Editing for Guests)"}
+              >
+                <span>{isPresenterMode ? '🔒 Presenting ON' : '🔓 Presenting OFF'}</span>
+              </button>
+            )}
+
+            {/* Version History Button */}
+            <button className="header-btn" onClick={() => { setShowHistoryModal(true); if (snapshots.length && !selectedSnapshot) setSelectedSnapshot(snapshots[0]); }} title="Version History Snapshots">
+              <span>⏱️ History</span>
+            </button>
+
+            <button className="header-btn" onClick={handleSaveSnapshot} title="Save Version Checkpoint">
+              <span>📸 Snapshot</span>
+            </button>
+
             <button className="header-btn" onClick={handleShare} title="Copy Share Link">
-              <span className="btn-text">Share Link</span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span className="btn-text">Share</span>
             </button>
 
             <button className={`header-btn lock-btn ${isRoomLocked ? 'locked' : ''}`} onClick={() => setShowLockModal(true)} title={isRoomLocked ? "Room is Password Protected" : "Set Password"}>
@@ -984,18 +1311,15 @@ export default function RoomPage() {
             </button>
 
             <button className="header-btn" onClick={() => setShowFileExplorer(!showFileExplorer)} title={showFileExplorer ? "Hide Files" : "Show Files"}>
-              <span>📁</span>
-              <span className="btn-text">{showFileExplorer ? ' Files' : ' Files'}</span>
+              <span>📁 Files</span>
             </button>
 
             <button className="header-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)} title={isSidebarOpen ? "Hide Chat" : "Show Chat"}>
-              <span>💬</span>
-              <span className="btn-text">{isSidebarOpen ? ' Hide Chat' : ' Show Chat'}</span>
+              <span>💬 Chat</span>
             </button>
 
             <button className="header-btn log-toggle-btn" onClick={() => setShowLogsModal(true)} title="Activity Logs">
-              <span>📋</span>
-              <span className="btn-text"> Logs</span>
+              <span>📋 Logs</span>
             </button>
           </div>
         </div>
@@ -1005,12 +1329,45 @@ export default function RoomPage() {
             {users.map(u => (
               <div key={u.id} className="user-avatar" style={{ backgroundColor: u.color }}>
                 {u.name.substring(0, 2).toUpperCase()}
-                <span className="tooltip">{u.name}{u.id === myUserIdRef.current ? ' (You)' : ''}</span>
+                <span className="tooltip">{u.name}{u.id === myUserIdRef.current ? ' (You)' : ''}{u.id === (isHost ? myUserIdRef.current : '') ? ' 👑 Host' : ''}</span>
               </div>
             ))}
           </div>
         </div>
       </header>
+
+      {/* Guest Read-Only Presenter Banner */}
+      {isPresenterMode && !isHost && (
+        <div className="presenter-banner">
+          <div className="presenter-banner-text">
+            <span>🔒 PRESENTER MODE ACTIVE</span>
+            <span>- Code editing is currently restricted to Host ({hostName}). You are in view-only Watch Party mode.</span>
+          </div>
+        </div>
+      )}
+
+      {/* WebRTC Video Call Floating Overlay */}
+      {isInCall && Object.keys(remoteStreams).length > 0 && (
+        <div className="webrtc-video-grid">
+          {Object.entries(remoteStreams).map(([peerId, stream]) => {
+            const peerUser = users.find(u => u.id === peerId);
+            return (
+              <div key={peerId} className="webrtc-video-card">
+                <video 
+                  autoPlay 
+                  playsInline 
+                  ref={el => {
+                    if (el && el.srcObject !== stream) {
+                      el.srcObject = stream;
+                    }
+                  }} 
+                />
+                <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Workspace */}
       <div className="workspace">
@@ -1285,6 +1642,68 @@ export default function RoomPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* Version History Timeline & Diff Modal */}
+      <div className={`modal ${showHistoryModal ? 'open' : ''}`}>
+        <div className="modal-content glass-card history-modal">
+          <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h3 style={{ margin: 0 }}>⏱️ Version History & Code Diff</h3>
+            <button className="close-picker-btn" onClick={() => setShowHistoryModal(false)}>✕</button>
+          </div>
+
+          <div className="history-container">
+            <div className="history-timeline">
+              <div style={{ padding: '0.5rem 0.8rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.3)' }}>
+                SNAPSHOTS ({snapshots.length})
+              </div>
+              {snapshots.length === 0 ? (
+                <div style={{ padding: '1rem', color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
+                  No snapshots saved yet. Click "📸 Snapshot" in top bar to save one.
+                </div>
+              ) : (
+                snapshots.map(s => (
+                  <div 
+                    key={s.id} 
+                    className={`snapshot-item ${selectedSnapshot?.id === s.id ? 'active' : ''}`}
+                    onClick={() => setSelectedSnapshot(s)}
+                  >
+                    <div className="snapshot-time">{s.timestamp}</div>
+                    <div className="snapshot-author">{s.note}</div>
+                    <div className="snapshot-file">by {s.author} ({s.filename})</div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="diff-view-pane">
+              {selectedSnapshot ? (
+                <>
+                  <div className="diff-view-header">
+                    <div>
+                      <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>{selectedSnapshot.note}</span>
+                      <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>({selectedSnapshot.filename})</span>
+                    </div>
+                    <button className="btn btn-primary" style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }} onClick={() => handleRestoreSnapshot(selectedSnapshot)}>
+                      ↺ Restore This Version
+                    </button>
+                  </div>
+                  <div className="diff-content">
+                    {generateSimpleDiff(selectedSnapshot.code, files[selectedSnapshot.filename]?.content || '').map((line, idx) => (
+                      <span key={idx} className={line.type === 'added' ? 'diff-line-added' : line.type === 'removed' ? 'diff-line-removed' : ''}>
+                        {line.text}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  Select a version snapshot on the left to view code diffs.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
