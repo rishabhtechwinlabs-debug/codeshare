@@ -651,7 +651,36 @@ export default function RoomPage() {
     }
   };
 
+  const pendingIceCandidatesRef = useRef({}); // userId -> Array of ICE candidates
+
   // WebRTC Audio / Video Call Handlers
+  const addIceCandidateSafely = async (pc, targetUserId, candidate) => {
+    if (pc.remoteDescription && pc.remoteDescription.type) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error('Error adding ICE candidate:', e);
+      }
+    } else {
+      if (!pendingIceCandidatesRef.current[targetUserId]) {
+        pendingIceCandidatesRef.current[targetUserId] = [];
+      }
+      pendingIceCandidatesRef.current[targetUserId].push(candidate);
+    }
+  };
+
+  const flushPendingIceCandidates = async (pc, targetUserId) => {
+    const candidates = pendingIceCandidatesRef.current[targetUserId] || [];
+    for (const candidate of candidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error('Error flushing candidate:', e);
+      }
+    }
+    pendingIceCandidatesRef.current[targetUserId] = [];
+  };
+
   const handleToggleCall = async () => {
     if (isInCall) {
       // Leave call
@@ -661,6 +690,7 @@ export default function RoomPage() {
       }
       Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
       peerConnectionsRef.current = {};
+      pendingIceCandidatesRef.current = {};
       setRemoteStreams({});
       setIsInCall(false);
       setIsVideoOn(false);
@@ -690,7 +720,12 @@ export default function RoomPage() {
     if (peerConnectionsRef.current[targetUserId]) return peerConnectionsRef.current[targetUserId];
 
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+      ]
     });
 
     if (localStreamRef.current) {
@@ -710,10 +745,12 @@ export default function RoomPage() {
     };
 
     pc.ontrack = (event) => {
-      setRemoteStreams(prev => ({
-        ...prev,
-        [targetUserId]: event.streams[0]
-      }));
+      if (event.streams && event.streams[0]) {
+        setRemoteStreams(prev => ({
+          ...prev,
+          [targetUserId]: event.streams[0]
+        }));
+      }
     };
 
     if (isInitiator) {
@@ -736,14 +773,28 @@ export default function RoomPage() {
   const handleIncomingSignal = async (senderUserId, signal) => {
     let pc = peerConnectionsRef.current[senderUserId];
 
-    if (!pc) {
-      pc = createPeerConnection(senderUserId, false);
-    }
-
     if (signal.type === 'offer') {
+      if (!localStreamRef.current) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideoOn });
+          localStreamRef.current = stream;
+          setIsInCall(true);
+          showToast('🎙️ Connected to voice call!', 'join');
+        } catch (e) {
+          console.error('Could not acquire local stream for incoming call:', e);
+        }
+      }
+
+      if (!pc) {
+        pc = createPeerConnection(senderUserId, false);
+      }
+
       await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+      await flushPendingIceCandidates(pc, senderUserId);
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({
           type: 'webrtc-signal',
@@ -752,9 +803,19 @@ export default function RoomPage() {
         }));
       }
     } else if (signal.type === 'answer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+        await flushPendingIceCandidates(pc, senderUserId);
+      }
     } else if (signal.type === 'candidate') {
-      await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      if (pc) {
+        await addIceCandidateSafely(pc, senderUserId, signal.candidate);
+      } else {
+        if (!pendingIceCandidatesRef.current[senderUserId]) {
+          pendingIceCandidatesRef.current[senderUserId] = [];
+        }
+        pendingIceCandidatesRef.current[senderUserId].push(signal.candidate);
+      }
     }
   };
 
@@ -1346,8 +1407,22 @@ export default function RoomPage() {
         </div>
       )}
 
+      {/* Background Audio Streams (Guarantees voice audio playback) */}
+      {Object.entries(remoteStreams).map(([peerId, stream]) => (
+        <audio
+          key={`audio-${peerId}`}
+          autoPlay
+          playsInline
+          ref={el => {
+            if (el && el.srcObject !== stream) {
+              el.srcObject = stream;
+            }
+          }}
+        />
+      ))}
+
       {/* WebRTC Video Call Floating Overlay */}
-      {isInCall && Object.keys(remoteStreams).length > 0 && (
+      {isInCall && isVideoOn && Object.keys(remoteStreams).length > 0 && (
         <div className="webrtc-video-grid">
           {Object.entries(remoteStreams).map(([peerId, stream]) => {
             const peerUser = users.find(u => u.id === peerId);
@@ -1356,6 +1431,7 @@ export default function RoomPage() {
                 <video 
                   autoPlay 
                   playsInline 
+                  muted
                   ref={el => {
                     if (el && el.srcObject !== stream) {
                       el.srcObject = stream;
