@@ -2583,6 +2583,102 @@ input.error {
 }
 
 /* ==========================================================================
+   Google Meet Style Video Side Rail & Dock Switcher
+   ========================================================================== */
+
+.webrtc-side-rail {
+  width: 250px;
+  min-width: 210px;
+  max-width: 300px;
+  height: 100%;
+  background: rgba(10, 14, 26, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  z-index: 35;
+  flex-shrink: 0;
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.webrtc-side-rail .shelf-header {
+  padding: 0.5rem 0.65rem;
+  background: rgba(15, 23, 42, 0.75);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.webrtc-side-rail .shelf-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.side-rail-scroll {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.65rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.side-rail-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.side-rail-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.webrtc-side-rail .webrtc-video-card {
+  width: 100%;
+  min-width: 100%;
+  height: 145px;
+  min-height: 145px;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+/* Dock Switcher Segmented Control */
+.dock-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.dock-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.18rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.dock-btn:hover {
+  color: var(--text-color);
+}
+
+.dock-btn.active {
+  background: rgba(56, 189, 248, 0.22);
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+/* ==========================================================================
    Mobile Navigation Bar & Responsive View Switching
    ========================================================================== */
 
@@ -2764,6 +2860,22 @@ input.error {
     position: relative;
     height: calc(100vh - 52px - 56px); /* minus header, minus mobile nav */
     overflow: hidden;
+  }
+
+  .webrtc-side-rail {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 190px;
+    z-index: 55;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.7);
+    border-left: 1px solid var(--border-color);
+  }
+
+  .webrtc-side-rail .webrtc-video-card {
+    height: 115px;
+    min-height: 115px;
   }
 
   /* Mobile Active View Switching */

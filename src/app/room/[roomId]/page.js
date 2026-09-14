@@ -125,6 +125,7 @@ export default function RoomPage() {
 
   // UI Redesign & Responsive States
   const [isVideoShelfMinimized, setIsVideoShelfMinimized] = useState(false);
+  const [stageDockPosition, setStageDockPosition] = useState('side'); // 'side' (Google Meet style) | 'top'
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [mobileActiveView, setMobileActiveView] = useState('editor'); // 'editor' | 'files' | 'chat' | 'terminal'
   const [copiedRoomId, setCopiedRoomId] = useState(false);
@@ -1891,6 +1892,124 @@ export default function RoomPage() {
     }
   };
 
+  const renderVideoCards = (isSideLayout = false) => (
+    <>
+      {/* Local Camera Preview */}
+      {isVideoOn && localStreamRef.current && (
+        <div className={`webrtc-video-card local-video-card ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}>
+          {speakingUsers[myUserIdRef.current] && (
+            <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+          )}
+          <video
+            autoPlay
+            playsInline
+            muted
+            ref={el => {
+              if (el && el.srcObject !== localStreamRef.current) {
+                el.srcObject = localStreamRef.current;
+              }
+            }}
+          />
+          <span className="webrtc-peer-name">You (Camera)</span>
+        </div>
+      )}
+
+      {/* Remote Video / Audio Cards */}
+      {Object.entries(remoteStreams).map(([peerId, stream]) => {
+        const peerUser = users.find(u => u.id === peerId);
+        const isPeerSpeaking = speakingUsers[peerId];
+        const stats = connectionStats[peerId];
+        const connState = peerConnectionStates[peerId] || 'connected';
+        const hasVideoTrack = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
+        return (
+          <div key={peerId} className={`webrtc-video-card ${isPeerSpeaking ? 'is-speaking' : ''}`}>
+            {isPeerSpeaking && (
+              <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+            )}
+            <span className={`webrtc-connection-badge badge-${connState}`}>
+              {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
+            </span>
+            {stats && (
+              <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
+            )}
+            {hasVideoTrack ? (
+              <video 
+                autoPlay 
+                playsInline 
+                muted
+                ref={el => {
+                  if (el && el.srcObject !== stream) {
+                    el.srcObject = stream;
+                    el.play().catch(err => console.warn('Video play trigger warning:', err));
+                  }
+                }} 
+              />
+            ) : (
+              <div className="audio-only-avatar-card">
+                <div 
+                  className={`audio-avatar-circle ${isPeerSpeaking ? 'pulse-speaking' : ''}`} 
+                  style={{ backgroundColor: peerUser?.color || '#3b82f6' }}
+                >
+                  {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
+                </div>
+                <span className="audio-status-label">{isPeerSpeaking ? 'Speaking...' : 'Audio Active'}</span>
+              </div>
+            )}
+            <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
+          </div>
+        );
+      })}
+    </>
+  );
+
+  const renderStageHeader = (isSideLayout = false) => (
+    <div className="shelf-header">
+      <div className="shelf-title">
+        <span className="live-dot">🟢</span>
+        <span>{isSideLayout ? 'MEET STAGE' : 'STUDIO STAGE'} ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)})</span>
+      </div>
+      <div className="shelf-actions">
+        {/* Google Meet Side vs Top Layout Switcher */}
+        <div className="dock-switcher" title="Switch Video Layout">
+          <button 
+            type="button"
+            className={`dock-btn ${stageDockPosition === 'side' ? 'active' : ''}`}
+            onClick={() => setStageDockPosition('side')}
+            title="Side Layout (Google Meet style)"
+          >
+            ◫ Side
+          </button>
+          <button 
+            type="button"
+            className={`dock-btn ${stageDockPosition === 'top' ? 'active' : ''}`}
+            onClick={() => setStageDockPosition('top')}
+            title="Top Banner Layout"
+          >
+            ⬒ Top
+          </button>
+        </div>
+
+        <button 
+          type="button"
+          className="shelf-leave-btn"
+          onClick={handleToggleCall}
+          title="Cancel and Leave Call"
+        >
+          <span>❌</span>
+          <span className="leave-btn-label">Leave</span>
+        </button>
+        <button 
+          type="button"
+          className="shelf-ctrl-btn" 
+          onClick={() => setIsVideoShelfMinimized(true)}
+          title="Minimize to Floating Pill"
+        >
+          —
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="room-body">
       <div className="glow-bg"></div>
@@ -2192,7 +2311,7 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* WebRTC Video Call Dockable Shelf or Minimized Pill */}
+      {/* WebRTC Video Call: Minimized Floating Pill or Top Banner Shelf */}
       {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current)) && (
         isVideoShelfMinimized ? (
           <div className="webrtc-minimized-pill">
@@ -2216,101 +2335,14 @@ export default function RoomPage() {
               ❌ End
             </button>
           </div>
-        ) : (
+        ) : stageDockPosition === 'top' ? (
           <div className="webrtc-video-shelf">
-            <div className="shelf-header">
-              <div className="shelf-title">
-                <span className="live-dot">🟢</span>
-                <span>STUDIO STAGE ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)} PARTICIPANTS)</span>
-              </div>
-              <div className="shelf-actions">
-                <button 
-                  className="shelf-leave-btn"
-                  onClick={handleToggleCall}
-                  title="Cancel and Leave Call"
-                >
-                  <span>❌</span>
-                  <span>Leave Call</span>
-                </button>
-                <button 
-                  className="shelf-ctrl-btn" 
-                  onClick={() => setIsVideoShelfMinimized(true)}
-                  title="Minimize Video Shelf"
-                >
-                  — Minimize
-                </button>
-              </div>
-            </div>
-
+            {renderStageHeader(false)}
             <div className="shelf-cards-scroll">
-              {/* Local Camera Preview */}
-              {isVideoOn && localStreamRef.current && (
-                <div className={`webrtc-video-card local-video-card ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}>
-                  {speakingUsers[myUserIdRef.current] && (
-                    <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
-                  )}
-                  <video
-                    autoPlay
-                    playsInline
-                    muted
-                    ref={el => {
-                      if (el && el.srcObject !== localStreamRef.current) {
-                        el.srcObject = localStreamRef.current;
-                      }
-                    }}
-                  />
-                  <span className="webrtc-peer-name">You (Camera)</span>
-                </div>
-              )}
-
-              {/* Remote Video / Audio Cards */}
-              {Object.entries(remoteStreams).map(([peerId, stream]) => {
-                const peerUser = users.find(u => u.id === peerId);
-                const isPeerSpeaking = speakingUsers[peerId];
-                const stats = connectionStats[peerId];
-                const connState = peerConnectionStates[peerId] || 'connected';
-                const hasVideoTrack = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
-                return (
-                  <div key={peerId} className={`webrtc-video-card ${isPeerSpeaking ? 'is-speaking' : ''}`}>
-                    {isPeerSpeaking && (
-                      <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
-                    )}
-                    <span className={`webrtc-connection-badge badge-${connState}`}>
-                      {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
-                    </span>
-                    {stats && (
-                      <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
-                    )}
-                    {hasVideoTrack ? (
-                      <video 
-                        autoPlay 
-                        playsInline 
-                        muted
-                        ref={el => {
-                          if (el && el.srcObject !== stream) {
-                            el.srcObject = stream;
-                            el.play().catch(err => console.warn('Video play trigger warning:', err));
-                          }
-                        }} 
-                      />
-                    ) : (
-                      <div className="audio-only-avatar-card">
-                        <div 
-                          className={`audio-avatar-circle ${isPeerSpeaking ? 'pulse-speaking' : ''}`} 
-                          style={{ backgroundColor: peerUser?.color || '#3b82f6' }}
-                        >
-                          {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
-                        </div>
-                        <span className="audio-status-label">{isPeerSpeaking ? 'Speaking...' : 'Audio Active'}</span>
-                      </div>
-                    )}
-                    <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
-                  </div>
-                );
-              })}
+              {renderVideoCards(false)}
             </div>
           </div>
-        )
+        ) : null
       )}
 
       {/* Workspace */}
@@ -2402,6 +2434,16 @@ export default function RoomPage() {
             </div>
           )}
         </div>
+
+        {/* Google Meet Style Video Side Rail */}
+        {isInCall && !isVideoShelfMinimized && stageDockPosition === 'side' && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current)) && (
+          <div className="webrtc-side-rail">
+            {renderStageHeader(true)}
+            <div className="side-rail-scroll">
+              {renderVideoCards(true)}
+            </div>
+          </div>
+        )}
 
         {/* Resizer Handle */}
         {isSidebarOpen && (
