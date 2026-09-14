@@ -114,7 +114,6 @@ export default function RoomPage() {
   const [remoteStreams, setRemoteStreams] = useState({});
 
   // Advanced WebRTC Studio Call States
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [speakingUsers, setSpeakingUsers] = useState({});
   const [connectionStats, setConnectionStats] = useState({});
   const [showDeviceModal, setShowDeviceModal] = useState(false);
@@ -130,7 +129,6 @@ export default function RoomPage() {
   const [mobileActiveView, setMobileActiveView] = useState('editor'); // 'editor' | 'files' | 'chat' | 'terminal'
   const [copiedRoomId, setCopiedRoomId] = useState(false);
 
-  const screenStreamRef = useRef(null);
   const audioElementsRef = useRef({});
   const activeCallUsersRef = useRef([]);
   const iceServersRef = useRef([
@@ -1298,71 +1296,6 @@ export default function RoomPage() {
     }
   };
 
-  const handleToggleScreenShare = async () => {
-    if (!isInCall) {
-      alert('Please join the call first before sharing your screen!');
-      return;
-    }
-
-    if (isScreenSharing) {
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach(t => t.stop());
-        screenStreamRef.current = null;
-      }
-      setIsScreenSharing(false);
-
-      const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
-      if (cameraTrack) {
-        Object.values(peerConnectionsRef.current).forEach(pc => {
-          if (pc && pc.signalingState !== 'closed') {
-            const senders = pc.getSenders();
-            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-            if (videoSender) videoSender.replaceTrack(cameraTrack);
-          }
-        });
-      }
-      showToast('🖥️ Screen sharing stopped.', 'leave');
-      return;
-    }
-
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      const screenTrack = screenStream.getVideoTracks()[0];
-      screenStreamRef.current = screenStream;
-      setIsScreenSharing(true);
-      showToast('🖥️ Started screen sharing!', 'join');
-
-      screenTrack.onended = () => {
-        setIsScreenSharing(false);
-        screenStreamRef.current = null;
-        const camTrack = localStreamRef.current?.getVideoTracks()[0];
-        if (camTrack) {
-          Object.values(peerConnectionsRef.current).forEach(pc => {
-            if (pc && pc.signalingState !== 'closed') {
-              const senders = pc.getSenders();
-              const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-              if (videoSender) videoSender.replaceTrack(camTrack);
-            }
-          });
-        }
-      };
-
-      Object.values(peerConnectionsRef.current).forEach(pc => {
-        if (pc && pc.signalingState !== 'closed') {
-          const senders = pc.getSenders();
-          const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-          if (videoSender) {
-            videoSender.replaceTrack(screenTrack);
-          } else {
-            pc.addTrack(screenTrack, screenStream);
-          }
-        }
-      });
-    } catch (err) {
-      console.warn('Screen share error:', err);
-    }
-  };
-
   const handleOpenDeviceModal = async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -1893,13 +1826,6 @@ export default function RoomPage() {
                   <span>{isVideoOn ? '📹' : '📷'}</span>
                 </button>
                 <button 
-                  className={`call-ctrl-btn ${isScreenSharing ? 'btn-active' : ''}`}
-                  onClick={handleToggleScreenShare} 
-                  title={isScreenSharing ? "Stop Screen Share" : "Share Screen"}
-                >
-                  <span>🖥️</span>
-                </button>
-                <button 
                   className="call-ctrl-btn"
                   onClick={handleOpenDeviceModal} 
                   title="Audio & Video Settings"
@@ -2133,7 +2059,7 @@ export default function RoomPage() {
       )}
 
       {/* WebRTC Video Call Dockable Shelf or Minimized Pill */}
-      {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current) || isScreenSharing) && (
+      {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current)) && (
         isVideoShelfMinimized ? (
           <div 
             className="webrtc-minimized-pill" 
@@ -2141,7 +2067,7 @@ export default function RoomPage() {
             title="Expand Video Stage"
           >
             <span className="live-dot">🟢</span>
-            <span>Stage Active ({Object.keys(remoteStreams).length + (isVideoOn || isScreenSharing ? 1 : 0)} participants)</span>
+            <span>Stage Active ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)} participants)</span>
             <span className="pill-expand-icon">⤢ Expand</span>
           </div>
         ) : (
@@ -2149,7 +2075,7 @@ export default function RoomPage() {
             <div className="shelf-header">
               <div className="shelf-title">
                 <span className="live-dot">🟢</span>
-                <span>STUDIO STAGE ({Object.keys(remoteStreams).length + (isVideoOn || isScreenSharing ? 1 : 0)} PARTICIPANTS)</span>
+                <span>STUDIO STAGE ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)} PARTICIPANTS)</span>
               </div>
               <button 
                 className="shelf-ctrl-btn" 
@@ -2161,23 +2087,6 @@ export default function RoomPage() {
             </div>
 
             <div className="shelf-cards-scroll">
-              {/* Local Screen Share Preview Card */}
-              {isScreenSharing && screenStreamRef.current && (
-                <div className="webrtc-video-card local-video-card">
-                  <video
-                    autoPlay
-                    playsInline
-                    muted
-                    ref={el => {
-                      if (el && el.srcObject !== screenStreamRef.current) {
-                        el.srcObject = screenStreamRef.current;
-                      }
-                    }}
-                  />
-                  <span className="webrtc-peer-name">You (Screen Share)</span>
-                </div>
-              )}
-
               {/* Local Camera Preview */}
               {isVideoOn && localStreamRef.current && (
                 <div className={`webrtc-video-card local-video-card ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}>
