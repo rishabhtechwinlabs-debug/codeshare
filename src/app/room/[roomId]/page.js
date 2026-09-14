@@ -802,11 +802,32 @@ export default function RoomPage() {
     };
 
     pc.ontrack = (event) => {
+      const handleTrackUpdate = () => {
+        if (event.streams && event.streams[0]) {
+          const tracks = event.streams[0].getTracks();
+          setRemoteStreams(prev => ({
+            ...prev,
+            [targetUserId]: new MediaStream(tracks)
+          }));
+        } else if (event.track) {
+          setRemoteStreams(prev => {
+            const existingTracks = prev[targetUserId] ? prev[targetUserId].getTracks() : [];
+            if (!existingTracks.some(t => t.id === event.track.id)) {
+              return {
+                ...prev,
+                [targetUserId]: new MediaStream([...existingTracks, event.track])
+              };
+            }
+            return prev;
+          });
+        }
+      };
+
+      handleTrackUpdate();
+
       if (event.streams && event.streams[0]) {
-        setRemoteStreams(prev => ({
-          ...prev,
-          [targetUserId]: event.streams[0]
-        }));
+        event.streams[0].onaddtrack = handleTrackUpdate;
+        event.streams[0].onremovetrack = handleTrackUpdate;
       }
     };
 
@@ -1433,12 +1454,21 @@ export default function RoomPage() {
 
         <div className="header-right">
           <div className="user-presence">
-            {users.map(u => (
-              <div key={u.id} className="user-avatar" style={{ backgroundColor: u.color }}>
-                {u.name.substring(0, 2).toUpperCase()}
-                <span className="tooltip">{u.name}{u.id === myUserIdRef.current ? ' (You)' : ''}{u.id === (isHost ? myUserIdRef.current : '') ? ' 👑 Host' : ''}</span>
-              </div>
-            ))}
+            {users.map(u => {
+              const inCall = callActiveUsers.includes(u.id);
+              return (
+                <div key={u.id} className={`user-avatar ${inCall ? 'in-call-avatar' : ''}`} style={{ backgroundColor: u.color }}>
+                  {u.name.substring(0, 2).toUpperCase()}
+                  {inCall && <span className="call-badge">🎙️</span>}
+                  <span className="tooltip">
+                    {u.name}
+                    {u.id === myUserIdRef.current ? ' (You)' : ''}
+                    {u.id === (isHost ? myUserIdRef.current : '') ? ' 👑 Host' : ''}
+                    {inCall ? ' 🎙️ (In Call)' : ''}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </header>
