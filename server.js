@@ -2,13 +2,65 @@ const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 const WebSocket = require('ws');
-const { supabase } = require('./src/lib/supabase');
+const mongoose = require('mongoose');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
 const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://rishabhtechwinlabs:YgKy6jhAk0rrQdZo@cluster0.uufayrt.mongodb.net/hivecode?retryWrites=true&w=majority';
+
+// Mongoose Connection Setup
+let isDbConnected = false;
+async function initMongoDB() {
+  if (isDbConnected) return;
+  try {
+    await mongoose.connect(MONGODB_URI);
+    isDbConnected = true;
+    console.log('> Connected successfully to MongoDB Atlas via Mongoose.');
+  } catch (err) {
+    console.error('> MongoDB connection error:', err.message);
+  }
+}
+initMongoDB();
+
+// Mongoose Schemas & Models (CommonJS compatible for server.js)
+const SnapshotSchema = new mongoose.Schema({
+  id: String,
+  timestamp: String,
+  filename: String,
+  code: String,
+  author: String,
+  note: String
+}, { _id: false });
+
+const RoomSchema = new mongoose.Schema({
+  roomId: { type: String, required: true, unique: true, index: true },
+  files: { type: Object, default: {} },
+  code: { type: String, default: '' },
+  password: { type: String, default: null },
+  theme: { type: String, default: 'dracula' },
+  snapshots: { type: [SnapshotSchema], default: [] },
+  updatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+const MessageSchema = new mongoose.Schema({
+  messageId: { type: String, required: true, unique: true, index: true },
+  roomId: { type: String, required: true, index: true },
+  sender: { type: String, required: true },
+  senderId: { type: String, required: true },
+  color: { type: String, default: '#00d4ff' },
+  text: { type: String, required: true },
+  isGif: { type: Boolean, default: false },
+  replyTo: { type: Object, default: null },
+  reactions: { type: Object, default: {} },
+  time: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+const RoomModel = mongoose.models.Room || mongoose.model('Room', RoomSchema);
+const MessageModel = mongoose.models.Message || mongoose.model('Message', MessageSchema);
 
 // Map of roomId -> { files: object, users: Map, messages: Array, typingUsers: Map, password: string|null, theme: string, hostUserId: string, isPresenterMode: boolean, snapshots: Array }
 const rooms = new Map();
@@ -79,52 +131,47 @@ async function getOrLoadRoom(roomId) {
     snapshots: []
   };
 
-  if (supabase) {
-    try {
-      const { data: dbRoom } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', roomId)
-        .single();
+  try {
+    await initMongoDB();
+    const dbRoom = await RoomModel.findOne({ roomId: roomId });
 
-      if (dbRoom) {
-        if (dbRoom.files && Object.keys(dbRoom.files).length > 0) {
-          roomData.files = dbRoom.files;
-          roomData.activeFile = Object.keys(dbRoom.files)[0];
-        } else if (dbRoom.code) {
-          roomData.files = {
-            'index.js': { content: dbRoom.code, language: 'javascript' }
-          };
-        }
-        roomData.password = dbRoom.password || null;
-        if (dbRoom.snapshots && Array.isArray(dbRoom.snapshots)) {
-          roomData.snapshots = dbRoom.snapshots;
-        }
-
-        const { data: dbMessages } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('room_id', roomId)
-          .order('created_at', { ascending: true })
-          .limit(100);
-
-        if (dbMessages && dbMessages.length > 0) {
-          roomData.messages = dbMessages.map(m => ({
-            id: m.id,
-            sender: m.sender,
-            senderId: m.sender_id,
-            color: m.color,
-            text: m.text,
-            isGif: m.is_gif,
-            replyTo: m.reply_to,
-            reactions: m.reactions || {},
-            time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }));
-        }
+    if (dbRoom) {
+      if (dbRoom.files && Object.keys(dbRoom.files).length > 0) {
+        roomData.files = dbRoom.files;
+        roomData.activeFile = Object.keys(dbRoom.files)[0];
+      } else if (dbRoom.code) {
+        roomData.files = {
+          'index.js': { content: dbRoom.code, language: 'javascript' }
+        };
       }
-    } catch (err) {
-      // Supabase fallback
+      roomData.password = dbRoom.password || null;
+      if (dbRoom.snapshots && Array.isArray(dbRoom.snapshots)) {
+        roomData.snapshots = dbRoom.snapshots;
+      }
+      if (dbRoom.theme) {
+        roomData.theme = dbRoom.theme;
+      }
+
+      const dbMessages = await MessageModel.find({ roomId: roomId })
+        .sort({ createdAt: 1 })
+        .limit(100);
+
+      if (dbMessages && dbMessages.length > 0) {
+        roomData.messages = dbMessages.map(m => ({
+          id: m.messageId,
+          sender: m.sender,
+          senderId: m.senderId,
+          color: m.color,
+          text: m.text,
+          isGif: m.isGif,
+          replyTo: m.replyTo,
+          reactions: m.reactions || {},
+          time: m.time || new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }));
+      }
     }
+  } catch (err) {
+    console.error('MongoDB room load fallback:', err.message);
   }
 
   rooms.set(roomId, roomData);
@@ -132,25 +179,26 @@ async function getOrLoadRoom(roomId) {
 }
 
 function scheduleFileSave(roomId, files) {
-  if (!supabase) return;
-
   if (fileSaveDebounceTimers.has(roomId)) {
     clearTimeout(fileSaveDebounceTimers.get(roomId));
   }
 
   const timer = setTimeout(async () => {
     try {
+      await initMongoDB();
       const defaultCode = files['index.js']?.content || Object.values(files)[0]?.content || '';
-      await supabase
-        .from('rooms')
-        .upsert({
-          id: roomId,
+      await RoomModel.findOneAndUpdate(
+        { roomId: roomId },
+        {
+          roomId: roomId,
           files: files,
           code: defaultCode,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
+          updatedAt: new Date()
+        },
+        { upsert: true, new: true }
+      );
     } catch (err) {
-      console.error(`Error saving room files for ${roomId}:`, err.message);
+      console.error(`Error saving room files for ${roomId} to MongoDB:`, err.message);
     } finally {
       fileSaveDebounceTimers.delete(roomId);
     }
@@ -160,59 +208,58 @@ function scheduleFileSave(roomId, files) {
 }
 
 async function saveSnapshotsToDB(roomId, snapshots) {
-  if (!supabase) return;
   try {
-    await supabase.from('rooms').upsert({
-      id: roomId,
-      snapshots: snapshots,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'id' });
+    await initMongoDB();
+    await RoomModel.findOneAndUpdate(
+      { roomId: roomId },
+      { roomId: roomId, snapshots: snapshots, updatedAt: new Date() },
+      { upsert: true }
+    );
   } catch (err) {
-    console.error('Error saving snapshots to Supabase:', err.message);
+    console.error('Error saving snapshots to MongoDB:', err.message);
   }
 }
 
 async function saveMessageToDB(roomId, msgObj) {
-  if (!supabase) return;
   try {
-    await supabase.from('rooms').upsert({ id: roomId }, { onConflict: 'id' });
-    await supabase.from('messages').insert({
-      id: msgObj.id,
-      room_id: roomId,
+    await initMongoDB();
+    await RoomModel.findOneAndUpdate({ roomId: roomId }, { roomId: roomId }, { upsert: true });
+    await MessageModel.create({
+      messageId: msgObj.id,
+      roomId: roomId,
       sender: msgObj.sender,
-      sender_id: msgObj.senderId,
+      senderId: msgObj.senderId,
       color: msgObj.color,
       text: msgObj.text,
-      is_gif: msgObj.isGif,
-      reply_to: msgObj.replyTo,
-      reactions: msgObj.reactions || {}
+      isGif: msgObj.isGif,
+      replyTo: msgObj.replyTo,
+      reactions: msgObj.reactions || {},
+      time: msgObj.time
     });
   } catch (err) {
-    console.error('Error saving message to Supabase:', err.message);
+    console.error('Error saving message to MongoDB:', err.message);
   }
 }
 
 async function updateMessageReactionsInDB(messageId, reactions) {
-  if (!supabase) return;
   try {
-    await supabase.from('messages').update({
-      reactions: reactions || {}
-    }).eq('id', messageId);
+    await initMongoDB();
+    await MessageModel.updateOne({ messageId: messageId }, { reactions: reactions || {} });
   } catch (err) {
-    console.error('Error updating reactions in Supabase:', err.message);
+    console.error('Error updating reactions in MongoDB:', err.message);
   }
 }
 
 async function updateRoomPasswordInDB(roomId, password) {
-  if (!supabase) return;
   try {
-    await supabase.from('rooms').upsert({
-      id: roomId,
-      password: password,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'id' });
+    await initMongoDB();
+    await RoomModel.findOneAndUpdate(
+      { roomId: roomId },
+      { roomId: roomId, password: password, updatedAt: new Date() },
+      { upsert: true }
+    );
   } catch (err) {
-    console.error('Error updating room password in Supabase:', err.message);
+    console.error('Error updating room password in MongoDB:', err.message);
   }
 }
 
@@ -339,7 +386,6 @@ app.prepare().then(() => {
             if (!currentRoomId || typeof data.code !== 'string' || data.code.length > 500000) return;
             const room = rooms.get(currentRoomId);
             if (room) {
-              // Enforce presenter mode lock for non-hosts
               if (room.isPresenterMode && userId !== room.hostUserId) return;
 
               const filename = data.filename || room.activeFile || 'index.js';
@@ -716,7 +762,6 @@ app.prepare().then(() => {
           }
         }
 
-        // Reassign host if host left
         if (room.hostUserId === userId && room.users.size > 0) {
           const nextHost = Array.from(room.users.values())[0];
           room.hostUserId = nextHost.id;
@@ -731,17 +776,16 @@ app.prepare().then(() => {
           if (fileSaveDebounceTimers.has(currentRoomId)) {
             clearTimeout(fileSaveDebounceTimers.get(currentRoomId));
             fileSaveDebounceTimers.delete(currentRoomId);
-            if (supabase) {
+            initMongoDB().then(() => {
               const defaultCode = room.files['index.js']?.content || Object.values(room.files)[0]?.content || '';
-              supabase.from('rooms').upsert({
-                id: currentRoomId,
-                files: room.files,
-                code: defaultCode,
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'id' }).then().catch(err => {
+              RoomModel.findOneAndUpdate(
+                { roomId: currentRoomId },
+                { roomId: currentRoomId, files: room.files, code: defaultCode, updatedAt: new Date() },
+                { upsert: true }
+              ).catch(err => {
                 console.error('Error flushing final code update on room close:', err.message);
               });
-            }
+            });
           }
           rooms.delete(currentRoomId);
         } else if (departingUser) {
