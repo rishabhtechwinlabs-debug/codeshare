@@ -801,6 +801,22 @@ export default function RoomPage() {
       }
     };
 
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'failed') {
+        pc.restartIce();
+        pc.createOffer({ iceRestart: true }).then(offer => {
+          pc.setLocalDescription(offer);
+          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify({
+              type: 'webrtc-signal',
+              targetUserId: targetUserId,
+              signal: { type: 'offer', offer: offer }
+            }));
+          }
+        }).catch(err => console.error('Error restarting ICE:', err));
+      }
+    };
+
     pc.ontrack = (event) => {
       const handleTrackUpdate = () => {
         if (event.streams && event.streams[0]) {
@@ -850,42 +866,57 @@ export default function RoomPage() {
 
   const handleIncomingSignal = async (senderUserId, signal) => {
     let pc = peerConnectionsRef.current[senderUserId];
+    const isPolite = myUserIdRef.current < senderUserId;
 
-    if (signal.type === 'offer') {
-      // Only process answer if local user is in the call
-      if (!isInCallRef.current || !localStreamRef.current) return;
+    try {
+      if (signal.type === 'offer') {
+        // Only process answer if local user is in the call
+        if (!isInCallRef.current || !localStreamRef.current) return;
 
-      if (!pc || pc.signalingState === 'closed') {
-        pc = createPeerConnection(senderUserId, false);
-      }
-
-      await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
-      await flushPendingIceCandidates(pc, senderUserId);
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({
-          type: 'webrtc-signal',
-          targetUserId: senderUserId,
-          signal: { type: 'answer', answer: answer }
-        }));
-      }
-    } else if (signal.type === 'answer') {
-      if (pc && pc.signalingState !== 'closed') {
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
-        await flushPendingIceCandidates(pc, senderUserId);
-      }
-    } else if (signal.type === 'candidate') {
-      if (pc && pc.signalingState !== 'closed') {
-        await addIceCandidateSafely(pc, senderUserId, signal.candidate);
-      } else {
-        if (!pendingIceCandidatesRef.current[senderUserId]) {
-          pendingIceCandidatesRef.current[senderUserId] = [];
+        if (!pc || pc.signalingState === 'closed') {
+          pc = createPeerConnection(senderUserId, false);
         }
-        pendingIceCandidatesRef.current[senderUserId].push(signal.candidate);
+
+        const isCollision = pc.signalingState !== 'stable';
+        if (isCollision) {
+          if (!isPolite) {
+            // Impolite peer ignores incoming offer during glare
+            return;
+          }
+          // Polite peer rolls back local offer to accept remote offer
+          await pc.setLocalDescription({ type: 'rollback' });
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+        await flushPendingIceCandidates(pc, senderUserId);
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({
+            type: 'webrtc-signal',
+            targetUserId: senderUserId,
+            signal: { type: 'answer', answer: answer }
+          }));
+        }
+      } else if (signal.type === 'answer') {
+        if (pc && pc.signalingState !== 'closed') {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+          await flushPendingIceCandidates(pc, senderUserId);
+        }
+      } else if (signal.type === 'candidate') {
+        if (pc && pc.signalingState !== 'closed') {
+          await addIceCandidateSafely(pc, senderUserId, signal.candidate);
+        } else {
+          if (!pendingIceCandidatesRef.current[senderUserId]) {
+            pendingIceCandidatesRef.current[senderUserId] = [];
+          }
+          pendingIceCandidatesRef.current[senderUserId].push(signal.candidate);
+        }
       }
+    } catch (err) {
+      console.error(`Error handling WebRTC signal from ${senderUserId}:`, err);
     }
   };
 
@@ -915,6 +946,24 @@ export default function RoomPage() {
           const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
           const newTrack = videoStream.getVideoTracks()[0];
           localStreamRef.current.addTrack(newTrack);
+
+          // Add new video track to all active peer connections and renegotiate
+          Object.entries(peerConnectionsRef.current).forEach(([targetId, pc]) => {
+            if (pc && pc.signalingState !== 'closed') {
+              pc.addTrack(newTrack, localStreamRef.current);
+              pc.createOffer().then(offer => {
+                pc.setLocalDescription(offer);
+                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                  socketRef.current.send(JSON.stringify({
+                    type: 'webrtc-signal',
+                    targetUserId: targetId,
+                    signal: { type: 'offer', offer: offer }
+                  }));
+                }
+              });
+            }
+          });
+
           setIsVideoOn(true);
         } catch (e) {
           alert('Could not enable camera: ' + e.message);
