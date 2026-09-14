@@ -137,15 +137,29 @@ export default function RoomPage() {
   const isSettingRemoteAnswerPendingRef = useRef({});
   const signalingQueueRef = useRef({});
   const watchdogTimersRef = useRef({});
+  const reconnectAttemptsRef = useRef({});
+  const reconnectDebounceRef = useRef({});
   const iceServersRef = useRef([
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
-    { urls: 'stun:stun.sipgate.net:3478' },
-    { urls: 'stun:stun.nextcloud.com:443' }
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ]);
 
   // Fetch dynamic WebRTC ICE configuration
@@ -873,8 +887,16 @@ export default function RoomPage() {
     if (!localStreamRef.current || !pc || pc.signalingState === 'closed') return;
     const senders = pc.getSenders();
     localStreamRef.current.getTracks().forEach(track => {
-      const alreadyAdded = senders.some(s => s.track && s.track.id === track.id);
-      if (!alreadyAdded) {
+      const existingSender = senders.find(s => s.track && s.track.kind === track.kind);
+      if (existingSender) {
+        if (existingSender.track.id !== track.id) {
+          try {
+            existingSender.replaceTrack(track);
+          } catch (e) {
+            console.warn('Error replacing track on PC:', e);
+          }
+        }
+      } else {
         try {
           pc.addTrack(track, localStreamRef.current);
         } catch (e) {
@@ -886,6 +908,7 @@ export default function RoomPage() {
 
   const addIceCandidateSafely = async (pc, targetUserId, candidateData) => {
     if (!candidateData) return;
+    if (pc && pc.signalingState === 'closed') return;
     try {
       const iceCandidate = (typeof RTCIceCandidate !== 'undefined' && candidateData.candidate)
         ? new RTCIceCandidate(candidateData)
@@ -905,9 +928,11 @@ export default function RoomPage() {
   };
 
   const flushPendingIceCandidates = async (pc, targetUserId) => {
+    if (!pc || pc.signalingState === 'closed') return;
     const candidates = pendingIceCandidatesRef.current[targetUserId] || [];
     pendingIceCandidatesRef.current[targetUserId] = [];
     for (const cand of candidates) {
+      if (!pc || pc.signalingState === 'closed') return;
       if (!cand || !cand.candidate) continue;
       try {
         const iceCandidate = (typeof RTCIceCandidate !== 'undefined' && cand.candidate)
@@ -941,6 +966,8 @@ export default function RoomPage() {
       makingOfferRef.current = {};
       isSettingRemoteAnswerPendingRef.current = {};
       signalingQueueRef.current = {};
+      reconnectAttemptsRef.current = {};
+      reconnectDebounceRef.current = {};
 
       // Stop and clean up all persistent consumer audio elements
       Object.values(audioElementsRef.current).forEach(audio => {
@@ -1086,11 +1113,34 @@ export default function RoomPage() {
       .catch(err => console.error(`[WebRTC] Error in queued sendOffer for ${targetUserId}:`, err));
   };
 
-  const reconnectPeer = (targetUserId) => {
+  const reconnectPeer = (targetUserId, forceFullReset = false) => {
     if (!isInCallRef.current || !localStreamRef.current) return;
     if (myUserIdRef.current >= targetUserId) return; // Only deterministic initiator recovers
 
-    console.log(`[WebRTC] Reconnecting peer session to ${targetUserId}...`);
+    // Debounce to prevent duplicate triggers from simultaneous connectionState and iceConnectionState events
+    const now = Date.now();
+    if (reconnectDebounceRef.current[targetUserId] && now - reconnectDebounceRef.current[targetUserId] < 2000) {
+      return;
+    }
+    reconnectDebounceRef.current[targetUserId] = now;
+
+    const attempts = reconnectAttemptsRef.current[targetUserId] || 0;
+    if (attempts >= 2) {
+      console.warn(`[WebRTC] Reconnection attempts exceeded (2) for ${targetUserId}. Waiting for network resolution.`);
+      setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'failed' }));
+      return;
+    }
+    reconnectAttemptsRef.current[targetUserId] = attempts + 1;
+
+    const pc = peerConnectionsRef.current[targetUserId];
+    // If connection is still in a stable signaling state, prefer clean ICE restart over destructive reset
+    if (!forceFullReset && pc && pc.signalingState === 'stable' && attempts === 0) {
+      console.log(`[WebRTC] Attempting clean ICE restart for ${targetUserId} (attempt ${attempts + 1})...`);
+      queueSendOffer(targetUserId, true);
+      return;
+    }
+
+    console.log(`[WebRTC] Reconnecting peer session to ${targetUserId} (attempt ${attempts + 1})...`);
 
     // 1. Notify remote peer to reset its PC
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -1116,7 +1166,7 @@ export default function RoomPage() {
       if (isInCallRef.current && localStreamRef.current) {
         createPeerConnection(targetUserId, true);
       }
-    }, 150);
+    }, 250);
   };
 
   const createPeerConnection = (targetUserId, isInitiator) => {
@@ -1153,6 +1203,7 @@ export default function RoomPage() {
       if (myUserIdRef.current >= targetUserId) return;
       if (watchdogTimersRef.current[targetUserId]) return;
 
+      // Generous 25s window for ICE gathering and TURN relay allocation across mobile networks/NATs
       watchdogTimersRef.current[targetUserId] = setTimeout(() => {
         delete watchdogTimersRef.current[targetUserId];
         const currentPc = peerConnectionsRef.current[targetUserId];
@@ -1164,7 +1215,7 @@ export default function RoomPage() {
           console.warn(`[WebRTC Watchdog] Initiator ${myUserIdRef.current} detected stalled connection to ${targetUserId} (${cState}/${iState}). Attempting recovery...`);
           reconnectPeer(targetUserId);
         }
-      }, 8000);
+      }, 25000);
     };
 
     // Track WebRTC connection lifecycle states
@@ -1173,6 +1224,8 @@ export default function RoomPage() {
       const iceState = pc.iceConnectionState;
       if (connState === 'connected' || iceState === 'connected' || iceState === 'completed') {
         clearWatchdog();
+        delete reconnectAttemptsRef.current[targetUserId];
+        delete reconnectDebounceRef.current[targetUserId];
         setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'connected' }));
       } else if (connState === 'failed' || iceState === 'failed') {
         clearWatchdog();
@@ -1334,12 +1387,14 @@ export default function RoomPage() {
         }
 
         if (pc.signalingState !== 'stable') {
-          console.warn(`[WebRTC] Cannot setRemoteDescription for ${senderUserId}: signalingState is ${pc.signalingState}`);
-          return;
+          console.warn(`[WebRTC] PC for ${senderUserId} in unexpected state ${pc.signalingState}, resetting connection to accept offer.`);
+          try { pc.close(); } catch (e) {}
+          delete peerConnectionsRef.current[senderUserId];
+          pc = createPeerConnection(senderUserId, false);
+          ensureLocalTracksOnPeerConnection(pc);
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
-        await flushPendingIceCandidates(pc, senderUserId);
 
         if (pc.signalingState === 'have-remote-offer') {
           const answer = await pc.createAnswer();
@@ -1353,6 +1408,8 @@ export default function RoomPage() {
             }));
           }
         }
+
+        await flushPendingIceCandidates(pc, senderUserId);
       } else if (signal.type === 'answer') {
         if (!pc || pc.signalingState === 'closed') return;
 
@@ -1379,6 +1436,7 @@ export default function RoomPage() {
         delete pendingIceCandidatesRef.current[senderUserId];
         delete makingOfferRef.current[senderUserId];
         delete isSettingRemoteAnswerPendingRef.current[senderUserId];
+        setPeerConnectionStates(prev => ({ ...prev, [senderUserId]: 'connecting' }));
       }
     } catch (err) {
       console.error(`[WebRTC] Error processing signal from ${senderUserId}:`, err);
@@ -1935,66 +1993,76 @@ export default function RoomPage() {
         )}
 
         {/* Remote Video / Audio Cards */}
-        {Object.entries(remoteStreams).map(([peerId, stream]) => {
-          const peerUser = users.find(u => u.id === peerId);
-          const isPeerSpeaking = speakingUsers[peerId];
-          const stats = connectionStats[peerId];
-          const connState = peerConnectionStates[peerId] || 'connected';
-          const hasVideoTrack = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
-          return (
-            <div 
-              key={peerId} 
-              className={`webrtc-video-card ${sizeClass} ${isPeerSpeaking ? 'is-speaking' : ''}`}
-              onClick={() => setSpotlightUser(peerId)}
-              title="Click to view in Large Spotlight View"
-            >
-              {isPeerSpeaking && (
-                <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
-              )}
-              <button 
-                type="button"
-                className="card-enlarge-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSpotlightUser(peerId);
-                }}
-                title="Large View (Google Meet Spotlight)"
+        {(() => {
+          const remotePeerIds = Array.from(new Set([
+            ...callActiveUsers.filter(id => id !== myUserIdRef.current),
+            ...Object.keys(remoteStreams)
+          ]));
+
+          return remotePeerIds.map((peerId) => {
+            const stream = remoteStreams[peerId];
+            const peerUser = users.find(u => u.id === peerId);
+            const isPeerSpeaking = speakingUsers[peerId];
+            const stats = connectionStats[peerId];
+            const connState = peerConnectionStates[peerId] || (stream ? 'connected' : 'connecting');
+            const hasVideoTrack = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
+            return (
+              <div 
+                key={peerId} 
+                className={`webrtc-video-card ${sizeClass} ${isPeerSpeaking ? 'is-speaking' : ''}`}
+                onClick={() => setSpotlightUser(peerId)}
+                title="Click to view in Large Spotlight View"
               >
-                ⛶ Large View
-              </button>
-              <span className={`webrtc-connection-badge badge-${connState}`}>
-                {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
-              </span>
-              {stats && (
-                <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
-              )}
-              {hasVideoTrack ? (
-                <video 
-                  autoPlay 
-                  playsInline 
-                  muted
-                  ref={el => {
-                    if (el && el.srcObject !== stream) {
-                      el.srcObject = stream;
-                      el.play().catch(err => console.warn('Video play trigger warning:', err));
-                    }
-                  }} 
-                />
-              ) : (
-                <div className="audio-only-avatar-card">
-                  <div 
-                    className={`audio-avatar-circle ${isPeerSpeaking ? 'pulse-speaking' : ''}`} 
-                    style={{ backgroundColor: peerUser?.color || '#3b82f6' }}
-                  >
-                    {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
+                {isPeerSpeaking && (
+                  <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+                )}
+                <button 
+                  type="button"
+                  className="card-enlarge-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSpotlightUser(peerId);
+                  }}
+                  title="Large View (Google Meet Spotlight)"
+                >
+                  ⛶ Large View
+                </button>
+                <span className={`webrtc-connection-badge badge-${connState}`}>
+                  {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
+                </span>
+                {stats && (
+                  <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
+                )}
+                {hasVideoTrack ? (
+                  <video 
+                    autoPlay 
+                    playsInline 
+                    muted
+                    ref={el => {
+                      if (el && el.srcObject !== stream) {
+                        el.srcObject = stream;
+                        el.play().catch(err => console.warn('Video play trigger warning:', err));
+                      }
+                    }} 
+                  />
+                ) : (
+                  <div className="audio-only-avatar-card">
+                    <div 
+                      className={`audio-avatar-circle ${isPeerSpeaking ? 'pulse-speaking' : ''}`} 
+                      style={{ backgroundColor: peerUser?.color || '#3b82f6' }}
+                    >
+                      {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
+                    </div>
+                    <span className="audio-status-label">
+                      {connState === 'connected' ? (isPeerSpeaking ? 'Speaking...' : 'Audio Active') : connState === 'connecting' ? 'Connecting...' : 'Connection Failed'}
+                    </span>
                   </div>
-                  <span className="audio-status-label">{isPeerSpeaking ? 'Speaking...' : 'Audio Active'}</span>
-                </div>
-              )}
-              <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
-            </div>
-          );
-        })}
+                )}
+                <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
+              </div>
+            );
+          });
+        })()}
       </>
     );
   };
