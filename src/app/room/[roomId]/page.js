@@ -124,6 +124,12 @@ export default function RoomPage() {
   const [selectedVideoDevice, setSelectedVideoDevice] = useState('');
   const [peerConnectionStates, setPeerConnectionStates] = useState({});
 
+  // UI Redesign & Responsive States
+  const [isVideoShelfMinimized, setIsVideoShelfMinimized] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
+  const [mobileActiveView, setMobileActiveView] = useState('editor'); // 'editor' | 'files' | 'chat' | 'terminal'
+  const [copiedRoomId, setCopiedRoomId] = useState(false);
+
   const screenStreamRef = useRef(null);
   const audioElementsRef = useRef({});
   const activeCallUsersRef = useRef([]);
@@ -1706,6 +1712,27 @@ export default function RoomPage() {
     }
   };
 
+  const handleCopyRoomId = () => {
+    if (!roomId) return;
+    navigator.clipboard.writeText(roomId).then(() => {
+      setCopiedRoomId(true);
+      showToast('📋 Room ID copied to clipboard!', 'join');
+      setTimeout(() => setCopiedRoomId(false), 2000);
+    }).catch(err => {
+      console.error('Failed to copy Room ID: ', err);
+    });
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (showToolsMenu && !e.target.closest('.tools-menu-wrapper')) {
+        setShowToolsMenu(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [showToolsMenu]);
+
   const handleShare = () => {
     const shareUrl = window.location.href;
     navigator.clipboard.writeText(shareUrl).then(() => {
@@ -1797,53 +1824,113 @@ export default function RoomPage() {
 
       {/* Header */}
       <header className="room-header">
+        {/* Left Zone: Logo & Room Pill & Explorer Toggle */}
         <div className="header-left">
-          <a href="/" className="logo-link">
-            <div className="logo" style={{ fontSize: '1.4rem' }}>
+          <a href="/" className="logo-link" title="HiveCode Home">
+            <div className="logo header-logo">
               <span className="logo-bracket">&lt;</span>
               <span className="logo-text">HiveCode</span>
               <span className="logo-bracket">/&gt;</span>
             </div>
           </a>
-          <div className="room-info">
-            <span className="room-label">ROOM:</span>
-            <span className="room-id">{roomId || '--------'}</span>
 
-            {/* Run Code Button */}
-            <button className="header-btn run-code-btn" onClick={handleRunCode} disabled={isRunningCode} title="Execute Code in Sandbox Console">
-              <span>{isRunningCode ? '⏳ Running...' : '▶️ Run Code'}</span>
-            </button>
+          <div className="room-badge-pill" onClick={handleCopyRoomId} title="Click to copy Room ID">
+            <span className="room-badge-label">ROOM</span>
+            <span className="room-badge-id">{roomId || '--------'}</span>
+            <span className="room-badge-copy-icon">{copiedRoomId ? '✓' : '📋'}</span>
+          </div>
 
-            {/* WebRTC Audio / Video Call Controls */}
-            <div className="webrtc-call-bar">
+          <button 
+            className={`header-icon-btn ${showFileExplorer ? 'active' : ''} desktop-only-btn`}
+            onClick={() => setShowFileExplorer(!showFileExplorer)} 
+            title={showFileExplorer ? "Hide Files Explorer" : "Show Files Explorer"}
+          >
+            <span>📁</span>
+            <span className="btn-label">Files</span>
+          </button>
+        </div>
+
+        {/* Center Zone: Run Code & Call Capsule */}
+        <div className="header-center">
+          {/* Run Code Primary CTA */}
+          <button 
+            className="run-code-action-btn" 
+            onClick={handleRunCode} 
+            disabled={isRunningCode} 
+            title="Execute Code in Sandbox Console (Ctrl+Enter)"
+          >
+            <span className="run-icon">{isRunningCode ? '⏳' : '▶'}</span>
+            <span className="run-text">{isRunningCode ? 'Running...' : 'Run Code'}</span>
+          </button>
+
+          {/* WebRTC Call Capsule */}
+          <div className="call-capsule">
+            {!isInCall ? (
               <button 
-                className={`header-btn ${isInCall ? 'call-btn-active' : callActiveUsers.length > 0 ? 'run-code-btn' : ''}`}
-                onClick={handleToggleCall} 
-                title={isInCall ? "Leave Call" : callActiveUsers.length > 0 ? "Join Ongoing Call" : "Start Voice Call"}
+                className={`call-pill-btn ${callActiveUsers.length > 0 ? 'call-pulse' : ''}`}
+                onClick={handleToggleCall}
+                title={callActiveUsers.length > 0 ? `Join Call (${callActiveUsers.length} Active)` : "Start Voice/Video Call"}
               >
-                <span>{isInCall ? '❌ Leave Call' : callActiveUsers.length > 0 ? `📞 Join Call (${callActiveUsers.length} Active)` : '🎙️ Start Call'}</span>
+                <span>{callActiveUsers.length > 0 ? '📞' : '🎙️'}</span>
+                <span className="pill-text">
+                  {callActiveUsers.length > 0 ? `Join Call (${callActiveUsers.length})` : 'Start Call'}
+                </span>
               </button>
-              {isInCall && (
-                <>
-                  <button className="header-btn" onClick={handleToggleMute} title={isMuted ? "Unmute Mic" : "Mute Mic"}>
-                    <span>{isMuted ? '🔇 Muted' : '🎙️ Mic On'}</span>
-                  </button>
-                  <button className="header-btn" onClick={handleToggleVideo} title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}>
-                    <span>{isVideoOn ? '📹 Cam On' : '📷 Cam Off'}</span>
-                  </button>
-                  <button className={`header-btn ${isScreenSharing ? 'run-code-btn' : ''}`} onClick={handleToggleScreenShare} title={isScreenSharing ? "Stop Screen Share" : "Share Screen / Desktop"}>
-                    <span>{isScreenSharing ? '🛑 Stop Share' : '🖥️ Share Screen'}</span>
-                  </button>
-                  <button className="header-btn" onClick={handleOpenDeviceModal} title="Audio & Video Settings">
-                    <span>⚙️ Devices</span>
-                  </button>
-                </>
-              )}
-            </div>
+            ) : (
+              <div className="call-active-toolbar">
+                <button 
+                  className={`call-ctrl-btn ${isMuted ? 'btn-danger' : 'btn-active'}`}
+                  onClick={handleToggleMute} 
+                  title={isMuted ? "Unmute Mic" : "Mute Mic"}
+                >
+                  <span>{isMuted ? '🔇' : '🎙️'}</span>
+                </button>
+                <button 
+                  className={`call-ctrl-btn ${isVideoOn ? 'btn-active' : ''}`}
+                  onClick={handleToggleVideo} 
+                  title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}
+                >
+                  <span>{isVideoOn ? '📹' : '📷'}</span>
+                </button>
+                <button 
+                  className={`call-ctrl-btn ${isScreenSharing ? 'btn-active' : ''}`}
+                  onClick={handleToggleScreenShare} 
+                  title={isScreenSharing ? "Stop Screen Share" : "Share Screen"}
+                >
+                  <span>🖥️</span>
+                </button>
+                <button 
+                  className="call-ctrl-btn"
+                  onClick={handleOpenDeviceModal} 
+                  title="Audio & Video Settings"
+                >
+                  <span>⚙️</span>
+                </button>
+                <button 
+                  className={`call-ctrl-btn ${!isVideoShelfMinimized ? 'btn-active' : ''}`}
+                  onClick={() => setIsVideoShelfMinimized(!isVideoShelfMinimized)}
+                  title={isVideoShelfMinimized ? "Expand Video Stage" : "Minimize Video Stage"}
+                >
+                  <span>{isVideoShelfMinimized ? '👁️' : '🕶️'}</span>
+                </button>
+                <button 
+                  className="call-ctrl-btn btn-leave-call"
+                  onClick={handleToggleCall} 
+                  title="Leave Call"
+                >
+                  <span>❌</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
-            {/* Language Selector */}
+        {/* Right Zone: Selectors, Tools Menu, Chat Toggle, Presence Avatars */}
+        <div className="header-right">
+          {/* Language Selector */}
+          <div className="select-pill-wrapper desktop-only">
             <select 
-              className="header-select"
+              className="header-compact-select"
               value={files[activeFile]?.language || 'javascript'}
               onChange={(e) => handleLanguageChange(e.target.value)}
               title="Select Programming Language"
@@ -1852,10 +1939,12 @@ export default function RoomPage() {
                 <option key={lang.id} value={lang.id}>{lang.label}</option>
               ))}
             </select>
+          </div>
 
-            {/* Theme Selector */}
+          {/* Theme Selector */}
+          <div className="select-pill-wrapper desktop-only">
             <select 
-              className="header-select"
+              className="header-compact-select"
               value={editorTheme}
               onChange={(e) => handleThemeChange(e.target.value)}
               title="Select Editor Theme"
@@ -1864,56 +1953,155 @@ export default function RoomPage() {
                 <option key={t.id} value={t.id}>{t.label}</option>
               ))}
             </select>
-
-            {/* Host Presenter Mode Toggle */}
-            {isHost && (
-              <button 
-                className={`header-btn ${isPresenterMode ? 'lock-btn locked' : ''}`} 
-                onClick={handleTogglePresenterMode}
-                title={isPresenterMode ? "Disable Presenter Mode" : "Enable Presenter Mode (Lock Editing for Guests)"}
-              >
-                <span>{isPresenterMode ? '🔒 Presenting ON' : '🔓 Presenting OFF'}</span>
-              </button>
-            )}
-
-            {/* Version History Button */}
-            <button className="header-btn" onClick={() => { setShowHistoryModal(true); if (snapshots.length && !selectedSnapshot) setSelectedSnapshot(snapshots[0]); }} title="Version History Snapshots">
-              <span>⏱️ History</span>
-            </button>
-
-            <button className="header-btn" onClick={handleSaveSnapshot} title="Save Version Checkpoint">
-              <span>📸 Snapshot</span>
-            </button>
-
-            <button className="header-btn" onClick={handleShare} title="Copy Share Link">
-              <span className="btn-text">Share</span>
-            </button>
-
-            <button className={`header-btn lock-btn ${isRoomLocked ? 'locked' : ''}`} onClick={() => setShowLockModal(true)} title={isRoomLocked ? "Room is Password Protected" : "Set Password"}>
-              <span>{isRoomLocked ? '🔒 Locked' : '🔓 Unlocked'}</span>
-            </button>
-
-            <button className="header-btn" onClick={() => setShowFileExplorer(!showFileExplorer)} title={showFileExplorer ? "Hide Files" : "Show Files"}>
-              <span>📁 Files</span>
-            </button>
-
-            <button className="header-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)} title={isSidebarOpen ? "Hide Chat" : "Show Chat"}>
-              <span>💬 Chat</span>
-            </button>
-
-            <button className="header-btn log-toggle-btn" onClick={() => setShowLogsModal(true)} title="Activity Logs">
-              <span>📋 Logs</span>
-            </button>
           </div>
-        </div>
 
-        <div className="header-right">
-          <div className="user-presence">
-            {users.map(u => {
+          {/* Tools / More Menu Dropdown */}
+          <div className="tools-menu-wrapper">
+            <button 
+              className={`header-icon-btn ${showToolsMenu ? 'active' : ''}`}
+              onClick={() => setShowToolsMenu(!showToolsMenu)}
+              title="Studio Tools & Settings"
+            >
+              <span>🛠️</span>
+              <span className="btn-label desktop-only">Tools</span>
+              <span style={{ fontSize: '0.65rem' }}>▾</span>
+            </button>
+
+            {showToolsMenu && (
+              <div className="tools-dropdown-menu">
+                <button 
+                  className="tools-menu-item"
+                  onClick={() => {
+                    setShowToolsMenu(false);
+                    setShowHistoryModal(true);
+                    if (snapshots.length && !selectedSnapshot) setSelectedSnapshot(snapshots[0]);
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem' }}>⏱️</span>
+                  <div>
+                    <div className="item-title">Version History</div>
+                    <div className="item-desc">View code diffs & checkpoints</div>
+                  </div>
+                </button>
+
+                <button 
+                  className="tools-menu-item"
+                  onClick={() => {
+                    setShowToolsMenu(false);
+                    handleSaveSnapshot();
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem' }}>📸</span>
+                  <div>
+                    <div className="item-title">Save Snapshot</div>
+                    <div className="item-desc">Create immediate restore point</div>
+                  </div>
+                </button>
+
+                <button 
+                  className="tools-menu-item"
+                  onClick={() => {
+                    setShowToolsMenu(false);
+                    setShowLockModal(true);
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem' }}>{isRoomLocked ? '🔒' : '🔓'}</span>
+                  <div>
+                    <div className="item-title">{isRoomLocked ? 'Room Protected' : 'Room Security'}</div>
+                    <div className="item-desc">{isRoomLocked ? 'Change password' : 'Lock with password'}</div>
+                  </div>
+                </button>
+
+                <button 
+                  className="tools-menu-item"
+                  onClick={() => {
+                    setShowToolsMenu(false);
+                    setShowLogsModal(true);
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem' }}>📋</span>
+                  <div>
+                    <div className="item-title">Activity Logs</div>
+                    <div className="item-desc">Real-time room events</div>
+                  </div>
+                </button>
+
+                {isHost && (
+                  <button 
+                    className="tools-menu-item highlight-item"
+                    onClick={() => {
+                      setShowToolsMenu(false);
+                      handleTogglePresenterMode();
+                    }}
+                  >
+                    <span style={{ fontSize: '1.1rem' }}>{isPresenterMode ? '🔓' : '🔒'}</span>
+                    <div>
+                      <div className="item-title">{isPresenterMode ? 'End Presenter Mode' : 'Start Presenter Mode'}</div>
+                      <div className="item-desc">{isPresenterMode ? 'Allow guests to edit' : 'Lock guest editing'}</div>
+                    </div>
+                  </button>
+                )}
+
+                {/* Mobile View: Quick Theme & Language inside Menu */}
+                <div className="mobile-menu-options mobile-only">
+                  <div className="menu-divider"></div>
+                  <div className="mobile-menu-select-row">
+                    <label>Language:</label>
+                    <select 
+                      value={files[activeFile]?.language || 'javascript'}
+                      onChange={(e) => handleLanguageChange(e.target.value)}
+                    >
+                      {LANGUAGES.map(lang => (
+                        <option key={lang.id} value={lang.id}>{lang.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mobile-menu-select-row">
+                    <label>Theme:</label>
+                    <select 
+                      value={editorTheme}
+                      onChange={(e) => handleThemeChange(e.target.value)}
+                    >
+                      {THEMES.map(t => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Share Button */}
+          <button className="header-primary-btn" onClick={handleShare} title="Copy Share Link">
+            <span>🔗</span>
+            <span className="btn-label desktop-only">Share</span>
+          </button>
+
+          {/* Chat Toggle Button */}
+          <button 
+            className={`header-icon-btn chat-toggle-btn ${isSidebarOpen ? 'active' : ''}`}
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+            title={isSidebarOpen ? "Hide Chat Sidebar" : "Show Chat Sidebar"}
+          >
+            <span>💬</span>
+            <span className="btn-label desktop-only">Chat</span>
+            {chatMessages.length > 0 && (
+              <span className="chat-badge-counter">{chatMessages.length}</span>
+            )}
+          </button>
+
+          {/* User Presence Avatar Stack */}
+          <div className="user-avatar-stack">
+            {users.slice(0, 4).map(u => {
               const inCall = callActiveUsers.includes(u.id);
               const isSpeaking = speakingUsers[u.id];
               return (
-                <div key={u.id} className={`user-avatar ${inCall ? 'in-call-avatar' : ''} ${isSpeaking ? 'speaking-active' : ''}`} style={{ backgroundColor: u.color }}>
+                <div 
+                  key={u.id} 
+                  className={`user-avatar ${inCall ? 'in-call-avatar' : ''} ${isSpeaking ? 'speaking-active' : ''}`} 
+                  style={{ backgroundColor: u.color }}
+                >
                   {u.name.substring(0, 2).toUpperCase()}
                   {inCall && <span className="call-badge">{isSpeaking ? '⚡' : '🎙️'}</span>}
                   <span className="tooltip">
@@ -1925,6 +2113,11 @@ export default function RoomPage() {
                 </div>
               );
             })}
+            {users.length > 4 && (
+              <div className="user-avatar overflow-avatar" title={`${users.length - 4} more users online`}>
+                +{users.length - 4}
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -1939,83 +2132,124 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* WebRTC Video Call Floating Overlay */}
+      {/* WebRTC Video Call Dockable Shelf or Minimized Pill */}
       {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current) || isScreenSharing) && (
-        <div className="webrtc-video-grid">
-          {/* Local Screen Share Preview Card */}
-          {isScreenSharing && screenStreamRef.current && (
-            <div className="webrtc-video-card local-video-card">
-              <video
-                autoPlay
-                playsInline
-                muted
-                ref={el => {
-                  if (el && el.srcObject !== screenStreamRef.current) {
-                    el.srcObject = screenStreamRef.current;
-                  }
-                }}
-              />
-              <span className="webrtc-peer-name">You (Screen Share)</span>
-            </div>
-          )}
-
-          {/* Local Camera Preview */}
-          {isVideoOn && localStreamRef.current && (
-            <div className={`webrtc-video-card local-video-card ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}>
-              {speakingUsers[myUserIdRef.current] && (
-                <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
-              )}
-              <video
-                autoPlay
-                playsInline
-                muted
-                ref={el => {
-                  if (el && el.srcObject !== localStreamRef.current) {
-                    el.srcObject = localStreamRef.current;
-                  }
-                }}
-              />
-              <span className="webrtc-peer-name">You (Camera)</span>
-            </div>
-          )}
-
-          {/* Remote Video Cards */}
-          {Object.entries(remoteStreams).map(([peerId, stream]) => {
-            const peerUser = users.find(u => u.id === peerId);
-            const isPeerSpeaking = speakingUsers[peerId];
-            const stats = connectionStats[peerId];
-            const connState = peerConnectionStates[peerId] || 'connected';
-            return (
-              <div key={peerId} className={`webrtc-video-card ${isPeerSpeaking ? 'is-speaking' : ''}`}>
-                {isPeerSpeaking && (
-                  <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
-                )}
-                <span className={`webrtc-connection-badge badge-${connState}`}>
-                  {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
-                </span>
-                {stats && (
-                  <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
-                )}
-                <video 
-                  autoPlay 
-                  playsInline 
-                  muted
-                  ref={el => {
-                    if (el && el.srcObject !== stream) {
-                      el.srcObject = stream;
-                      el.play().catch(err => console.warn('Video play trigger warning:', err));
-                    }
-                  }} 
-                />
-                <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
+        isVideoShelfMinimized ? (
+          <div 
+            className="webrtc-minimized-pill" 
+            onClick={() => setIsVideoShelfMinimized(false)}
+            title="Expand Video Stage"
+          >
+            <span className="live-dot">🟢</span>
+            <span>Stage Active ({Object.keys(remoteStreams).length + (isVideoOn || isScreenSharing ? 1 : 0)} participants)</span>
+            <span className="pill-expand-icon">⤢ Expand</span>
+          </div>
+        ) : (
+          <div className="webrtc-video-shelf">
+            <div className="shelf-header">
+              <div className="shelf-title">
+                <span className="live-dot">🟢</span>
+                <span>STUDIO STAGE ({Object.keys(remoteStreams).length + (isVideoOn || isScreenSharing ? 1 : 0)} PARTICIPANTS)</span>
               </div>
-            );
-          })}
-        </div>
+              <button 
+                className="shelf-ctrl-btn" 
+                onClick={() => setIsVideoShelfMinimized(true)}
+                title="Minimize Video Shelf"
+              >
+                — Minimize
+              </button>
+            </div>
+
+            <div className="shelf-cards-scroll">
+              {/* Local Screen Share Preview Card */}
+              {isScreenSharing && screenStreamRef.current && (
+                <div className="webrtc-video-card local-video-card">
+                  <video
+                    autoPlay
+                    playsInline
+                    muted
+                    ref={el => {
+                      if (el && el.srcObject !== screenStreamRef.current) {
+                        el.srcObject = screenStreamRef.current;
+                      }
+                    }}
+                  />
+                  <span className="webrtc-peer-name">You (Screen Share)</span>
+                </div>
+              )}
+
+              {/* Local Camera Preview */}
+              {isVideoOn && localStreamRef.current && (
+                <div className={`webrtc-video-card local-video-card ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}>
+                  {speakingUsers[myUserIdRef.current] && (
+                    <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+                  )}
+                  <video
+                    autoPlay
+                    playsInline
+                    muted
+                    ref={el => {
+                      if (el && el.srcObject !== localStreamRef.current) {
+                        el.srcObject = localStreamRef.current;
+                      }
+                    }}
+                  />
+                  <span className="webrtc-peer-name">You (Camera)</span>
+                </div>
+              )}
+
+              {/* Remote Video / Audio Cards */}
+              {Object.entries(remoteStreams).map(([peerId, stream]) => {
+                const peerUser = users.find(u => u.id === peerId);
+                const isPeerSpeaking = speakingUsers[peerId];
+                const stats = connectionStats[peerId];
+                const connState = peerConnectionStates[peerId] || 'connected';
+                const hasVideoTrack = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
+                return (
+                  <div key={peerId} className={`webrtc-video-card ${isPeerSpeaking ? 'is-speaking' : ''}`}>
+                    {isPeerSpeaking && (
+                      <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+                    )}
+                    <span className={`webrtc-connection-badge badge-${connState}`}>
+                      {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
+                    </span>
+                    {stats && (
+                      <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
+                    )}
+                    {hasVideoTrack ? (
+                      <video 
+                        autoPlay 
+                        playsInline 
+                        muted
+                        ref={el => {
+                          if (el && el.srcObject !== stream) {
+                            el.srcObject = stream;
+                            el.play().catch(err => console.warn('Video play trigger warning:', err));
+                          }
+                        }} 
+                      />
+                    ) : (
+                      <div className="audio-only-avatar-card">
+                        <div 
+                          className={`audio-avatar-circle ${isPeerSpeaking ? 'pulse-speaking' : ''}`} 
+                          style={{ backgroundColor: peerUser?.color || '#3b82f6' }}
+                        >
+                          {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
+                        </div>
+                        <span className="audio-status-label">{isPeerSpeaking ? 'Speaking...' : 'Audio Active'}</span>
+                      </div>
+                    )}
+                    <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )
       )}
 
       {/* Workspace */}
-      <div className="workspace">
+      <div className="workspace" data-mobile-view={mobileActiveView}>
         {/* File Explorer Sidebar */}
         {showFileExplorer && (
           <div className="file-explorer-sidebar">
@@ -2290,6 +2524,50 @@ export default function RoomPage() {
           </div>
         </div>
       </div>
+
+      {/* Mobile View Switcher Tab Bar (< 768px) */}
+      <nav className="mobile-nav-bar" aria-label="Mobile Navigation">
+        <button 
+          className={`mobile-nav-item ${mobileActiveView === 'editor' ? 'active' : ''}`}
+          onClick={() => setMobileActiveView('editor')}
+        >
+          <span className="nav-icon">💻</span>
+          <span className="nav-label">Code</span>
+        </button>
+
+        <button 
+          className={`mobile-nav-item ${mobileActiveView === 'files' ? 'active' : ''}`}
+          onClick={() => setMobileActiveView('files')}
+        >
+          <span className="nav-icon">📁</span>
+          <span className="nav-label">Files</span>
+          {Object.keys(files).length > 0 && (
+            <span className="nav-badge">{Object.keys(files).length}</span>
+          )}
+        </button>
+
+        <button 
+          className={`mobile-nav-item ${mobileActiveView === 'chat' ? 'active' : ''}`}
+          onClick={() => setMobileActiveView('chat')}
+        >
+          <span className="nav-icon">💬</span>
+          <span className="nav-label">Chat</span>
+          {chatMessages.length > 0 && (
+            <span className="nav-badge">{chatMessages.length}</span>
+          )}
+        </button>
+
+        <button 
+          className={`mobile-nav-item ${mobileActiveView === 'terminal' ? 'active' : ''}`}
+          onClick={() => {
+            setShowTerminal(true);
+            setMobileActiveView('terminal');
+          }}
+        >
+          <span className="nav-icon">🖥️</span>
+          <span className="nav-label">Console</span>
+        </button>
+      </nav>
 
       {/* Version History Timeline & Diff Modal */}
       <div className={`modal ${showHistoryModal ? 'open' : ''}`}>
