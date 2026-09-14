@@ -126,6 +126,7 @@ export default function RoomPage() {
   // UI Redesign & Responsive States
   const [isVideoShelfMinimized, setIsVideoShelfMinimized] = useState(false);
   const [stageDockPosition, setStageDockPosition] = useState('side'); // 'side' (Google Meet style) | 'top'
+  const [spotlightUser, setSpotlightUser] = useState(null); // peerId or 'local' for large view modal
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [mobileActiveView, setMobileActiveView] = useState('editor'); // 'editor' | 'files' | 'chat' | 'terminal'
   const [copiedRoomId, setCopiedRoomId] = useState(false);
@@ -1892,75 +1893,111 @@ export default function RoomPage() {
     }
   };
 
-  const renderVideoCards = (isSideLayout = false) => (
-    <>
-      {/* Local Camera Preview */}
-      {isVideoOn && localStreamRef.current && (
-        <div className={`webrtc-video-card local-video-card ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}>
-          {speakingUsers[myUserIdRef.current] && (
-            <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
-          )}
-          <video
-            autoPlay
-            playsInline
-            muted
-            ref={el => {
-              if (el && el.srcObject !== localStreamRef.current) {
-                el.srcObject = localStreamRef.current;
-              }
-            }}
-          />
-          <span className="webrtc-peer-name">You (Camera)</span>
-        </div>
-      )}
+  const renderVideoCards = (isSideLayout = false) => {
+    const totalParticipants = Object.keys(remoteStreams).length + (isVideoOn && localStreamRef.current ? 1 : 0);
+    const sizeClass = totalParticipants <= 1 ? 'card-large' : totalParticipants === 2 ? 'card-medium' : 'card-standard';
 
-      {/* Remote Video / Audio Cards */}
-      {Object.entries(remoteStreams).map(([peerId, stream]) => {
-        const peerUser = users.find(u => u.id === peerId);
-        const isPeerSpeaking = speakingUsers[peerId];
-        const stats = connectionStats[peerId];
-        const connState = peerConnectionStates[peerId] || 'connected';
-        const hasVideoTrack = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
-        return (
-          <div key={peerId} className={`webrtc-video-card ${isPeerSpeaking ? 'is-speaking' : ''}`}>
-            {isPeerSpeaking && (
+    return (
+      <>
+        {/* Local Camera Preview */}
+        {isVideoOn && localStreamRef.current && (
+          <div 
+            className={`webrtc-video-card local-video-card ${sizeClass} ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}
+            onClick={() => setSpotlightUser('local')}
+            title="Click to view in Large Spotlight View"
+          >
+            {speakingUsers[myUserIdRef.current] && (
               <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
             )}
-            <span className={`webrtc-connection-badge badge-${connState}`}>
-              {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
-            </span>
-            {stats && (
-              <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
-            )}
-            {hasVideoTrack ? (
-              <video 
-                autoPlay 
-                playsInline 
-                muted
-                ref={el => {
-                  if (el && el.srcObject !== stream) {
-                    el.srcObject = stream;
-                    el.play().catch(err => console.warn('Video play trigger warning:', err));
-                  }
-                }} 
-              />
-            ) : (
-              <div className="audio-only-avatar-card">
-                <div 
-                  className={`audio-avatar-circle ${isPeerSpeaking ? 'pulse-speaking' : ''}`} 
-                  style={{ backgroundColor: peerUser?.color || '#3b82f6' }}
-                >
-                  {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
-                </div>
-                <span className="audio-status-label">{isPeerSpeaking ? 'Speaking...' : 'Audio Active'}</span>
-              </div>
-            )}
-            <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
+            <button 
+              type="button"
+              className="card-enlarge-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSpotlightUser('local');
+              }}
+              title="Large View (Google Meet Spotlight)"
+            >
+              ⛶ Large View
+            </button>
+            <video
+              autoPlay
+              playsInline
+              muted
+              ref={el => {
+                if (el && el.srcObject !== localStreamRef.current) {
+                  el.srcObject = localStreamRef.current;
+                }
+              }}
+            />
+            <span className="webrtc-peer-name">You (Camera)</span>
           </div>
-        );
-      })}
-    </>
-  );
+        )}
+
+        {/* Remote Video / Audio Cards */}
+        {Object.entries(remoteStreams).map(([peerId, stream]) => {
+          const peerUser = users.find(u => u.id === peerId);
+          const isPeerSpeaking = speakingUsers[peerId];
+          const stats = connectionStats[peerId];
+          const connState = peerConnectionStates[peerId] || 'connected';
+          const hasVideoTrack = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
+          return (
+            <div 
+              key={peerId} 
+              className={`webrtc-video-card ${sizeClass} ${isPeerSpeaking ? 'is-speaking' : ''}`}
+              onClick={() => setSpotlightUser(peerId)}
+              title="Click to view in Large Spotlight View"
+            >
+              {isPeerSpeaking && (
+                <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+              )}
+              <button 
+                type="button"
+                className="card-enlarge-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSpotlightUser(peerId);
+                }}
+                title="Large View (Google Meet Spotlight)"
+              >
+                ⛶ Large View
+              </button>
+              <span className={`webrtc-connection-badge badge-${connState}`}>
+                {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
+              </span>
+              {stats && (
+                <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
+              )}
+              {hasVideoTrack ? (
+                <video 
+                  autoPlay 
+                  playsInline 
+                  muted
+                  ref={el => {
+                    if (el && el.srcObject !== stream) {
+                      el.srcObject = stream;
+                      el.play().catch(err => console.warn('Video play trigger warning:', err));
+                    }
+                  }} 
+                />
+              ) : (
+                <div className="audio-only-avatar-card">
+                  <div 
+                    className={`audio-avatar-circle ${isPeerSpeaking ? 'pulse-speaking' : ''}`} 
+                    style={{ backgroundColor: peerUser?.color || '#3b82f6' }}
+                  >
+                    {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
+                  </div>
+                  <span className="audio-status-label">{isPeerSpeaking ? 'Speaking...' : 'Audio Active'}</span>
+                </div>
+              )}
+              <span className="webrtc-peer-name">{peerUser ? peerUser.name : 'Peer'}</span>
+            </div>
+          );
+        })}
+      </>
+    );
+  };
 
   const renderStageHeader = (isSideLayout = false) => (
     <div className="shelf-header">
@@ -1989,15 +2026,6 @@ export default function RoomPage() {
           </button>
         </div>
 
-        <button 
-          type="button"
-          className="shelf-leave-btn"
-          onClick={handleToggleCall}
-          title="Cancel and Leave Call"
-        >
-          <span>❌</span>
-          <span className="leave-btn-label">Leave</span>
-        </button>
         <button 
           type="button"
           className="shelf-ctrl-btn" 
@@ -2879,6 +2907,87 @@ export default function RoomPage() {
           <button className="btn btn-primary" onClick={() => setShowDeviceModal(false)} style={{ width: '100%' }}>Done</button>
         </div>
       </div>
+
+      {/* Google Meet Large View / Spotlight Cinema Modal */}
+      {spotlightUser && isInCall && (
+        <div className="spotlight-overlay" onClick={() => setSpotlightUser(null)}>
+          <div className="spotlight-container" onClick={(e) => e.stopPropagation()}>
+            <div className="spotlight-header">
+              <div className="spotlight-user-info">
+                <span className="live-dot">🟢</span>
+                <span className="spotlight-user-name">
+                  {spotlightUser === 'local' ? 'You (Camera)' : (users.find(u => u.id === spotlightUser)?.nickname || 'Participant')}
+                </span>
+                {spotlightUser !== 'local' && connectionStats[spotlightUser] && (
+                  <span className="webrtc-ping-badge">📶 {connectionStats[spotlightUser].rtt || connectionStats[spotlightUser].latencyMs}ms</span>
+                )}
+                {speakingUsers[spotlightUser === 'local' ? myUserIdRef.current : spotlightUser] && (
+                  <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+                )}
+              </div>
+              <button 
+                type="button"
+                className="spotlight-close-btn"
+                onClick={() => setSpotlightUser(null)}
+                title="Exit Large View (Esc)"
+              >
+                ✕ Close Large View
+              </button>
+            </div>
+
+            <div className="spotlight-body">
+              {spotlightUser === 'local' ? (
+                localStreamRef.current && isVideoOn ? (
+                  <video
+                    autoPlay
+                    playsInline
+                    muted
+                    ref={el => {
+                      if (el && el.srcObject !== localStreamRef.current) {
+                        el.srcObject = localStreamRef.current;
+                      }
+                    }}
+                    className="spotlight-video"
+                  />
+                ) : (
+                  <div className="spotlight-avatar-placeholder">
+                    <div className="large-avatar-circle" style={{ backgroundColor: '#10b981' }}>
+                      {nickname ? nickname.slice(0, 2).toUpperCase() : 'ME'}
+                    </div>
+                    <span className="spotlight-avatar-name">{nickname || 'You'} (Camera Off)</span>
+                  </div>
+                )
+              ) : (
+                (() => {
+                  const stream = remoteStreams[spotlightUser];
+                  const hasVideo = stream && stream.getVideoTracks && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled;
+                  const peer = users.find(u => u.id === spotlightUser);
+                  return hasVideo ? (
+                    <video
+                      autoPlay
+                      playsInline
+                      ref={el => {
+                        if (el && el.srcObject !== stream) {
+                          el.srcObject = stream;
+                          el.play().catch(e => console.warn('Spotlight play error:', e));
+                        }
+                      }}
+                      className="spotlight-video"
+                    />
+                  ) : (
+                    <div className="spotlight-avatar-placeholder">
+                      <div className="large-avatar-circle" style={{ backgroundColor: peer?.color || '#3b82f6' }}>
+                        {peer ? peer.name.substring(0, 2).toUpperCase() : 'PE'}
+                      </div>
+                      <span className="spotlight-avatar-name">{peer ? peer.name : 'Participant'} (Audio Only)</span>
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification Container */}
       <div className="toast-container">
