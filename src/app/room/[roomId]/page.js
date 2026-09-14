@@ -1966,25 +1966,19 @@ export default function RoomPage() {
                   <span>{isVideoOn ? '📹' : '📷'}</span>
                 </button>
                 <button 
-                  className="call-ctrl-btn"
+                  className="call-ctrl-btn desktop-only"
                   onClick={handleOpenDeviceModal} 
                   title="Audio & Video Settings"
                 >
                   <span>⚙️</span>
                 </button>
                 <button 
-                  className={`call-ctrl-btn ${!isVideoShelfMinimized ? 'btn-active' : ''}`}
-                  onClick={() => setIsVideoShelfMinimized(!isVideoShelfMinimized)}
-                  title={isVideoShelfMinimized ? "Expand Video Stage" : "Minimize Video Stage"}
-                >
-                  <span>{isVideoShelfMinimized ? '👁️' : '🕶️'}</span>
-                </button>
-                <button 
                   className="call-ctrl-btn btn-leave-call"
                   onClick={handleToggleCall} 
-                  title="Leave Call"
+                  title="Cancel and Leave Call"
                 >
-                  <span>❌</span>
+                  <span className="leave-icon">❌</span>
+                  <span className="leave-text">End</span>
                 </button>
               </div>
             )}
@@ -2201,14 +2195,26 @@ export default function RoomPage() {
       {/* WebRTC Video Call Dockable Shelf or Minimized Pill */}
       {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current)) && (
         isVideoShelfMinimized ? (
-          <div 
-            className="webrtc-minimized-pill" 
-            onClick={() => setIsVideoShelfMinimized(false)}
-            title="Expand Video Stage"
-          >
-            <span className="live-dot">🟢</span>
-            <span>Stage Active ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)} participants)</span>
-            <span className="pill-expand-icon">⤢ Expand</span>
+          <div className="webrtc-minimized-pill">
+            <div 
+              className="pill-clickable-area"
+              onClick={() => setIsVideoShelfMinimized(false)}
+              title="Expand Video Stage"
+            >
+              <span className="live-dot">🟢</span>
+              <span>Stage ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)})</span>
+              <span className="pill-expand-icon">⤢</span>
+            </div>
+            <button 
+              className="pill-leave-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggleCall();
+              }}
+              title="Cancel and Leave Call"
+            >
+              ❌ End
+            </button>
           </div>
         ) : (
           <div className="webrtc-video-shelf">
@@ -2217,13 +2223,23 @@ export default function RoomPage() {
                 <span className="live-dot">🟢</span>
                 <span>STUDIO STAGE ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)} PARTICIPANTS)</span>
               </div>
-              <button 
-                className="shelf-ctrl-btn" 
-                onClick={() => setIsVideoShelfMinimized(true)}
-                title="Minimize Video Shelf"
-              >
-                — Minimize
-              </button>
+              <div className="shelf-actions">
+                <button 
+                  className="shelf-leave-btn"
+                  onClick={handleToggleCall}
+                  title="Cancel and Leave Call"
+                >
+                  <span>❌</span>
+                  <span>Leave Call</span>
+                </button>
+                <button 
+                  className="shelf-ctrl-btn" 
+                  onClick={() => setIsVideoShelfMinimized(true)}
+                  title="Minimize Video Shelf"
+                >
+                  — Minimize
+                </button>
+              </div>
             </div>
 
             <div className="shelf-cards-scroll">

@@ -658,16 +658,34 @@ input[type="text"]:focus {
 }
 
 .call-ctrl-btn.btn-leave-call {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #f87171;
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
   margin-left: 0.2rem;
+  width: auto;
+  min-width: 46px;
+  padding: 0 0.45rem;
+  gap: 0.25rem;
+  font-weight: 700;
+  font-size: 0.75rem;
 }
 
-.call-ctrl-btn.btn-leave-call:hover {
+.call-ctrl-btn.btn-leave-call:hover,
+.call-ctrl-btn.btn-leave-call:active {
   background: #ef4444;
   color: #fff;
   border-color: #ef4444;
+  transform: translateY(-1px);
+}
+
+.leave-icon {
+  font-size: 0.72rem;
+}
+
+.leave-text {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* Zone 3: Right */
@@ -2376,6 +2394,35 @@ input.error {
   color: var(--text-color);
 }
 
+.shelf-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.shelf-leave-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #fca5a5;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: all 0.15s ease;
+}
+
+.shelf-leave-btn:hover,
+.shelf-leave-btn:active {
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+  transform: translateY(-1px);
+}
+
 .shelf-cards-scroll {
   display: flex;
   align-items: center;
@@ -2484,31 +2531,55 @@ input.error {
   right: 16px;
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  background: rgba(15, 23, 42, 0.9);
+  gap: 0.35rem;
+  background: rgba(15, 23, 42, 0.95);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(16, 185, 129, 0.4);
   color: #f1f5f9;
-  padding: 0.4rem 0.8rem;
+  padding: 0.25rem 0.4rem 0.25rem 0.75rem;
   border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 600;
-  cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   z-index: 90;
   transition: all 0.2s ease;
 }
 
 .webrtc-minimized-pill:hover {
-  transform: translateY(-1px);
   border-color: #10b981;
-  background: rgba(15, 23, 42, 1);
+}
+
+.pill-clickable-area {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.pill-leave-btn {
+  background: rgba(239, 68, 68, 0.25);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.18rem 0.45rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  margin-left: 0.25rem;
+  transition: all 0.15s ease;
+}
+
+.pill-leave-btn:hover,
+.pill-leave-btn:active {
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
 }
 
 .pill-expand-icon {
   color: #38bdf8;
   font-size: 0.7rem;
-  margin-left: 0.3rem;
+  margin-left: 0.2rem;
 }
 
 /* ==========================================================================
@@ -2606,42 +2677,85 @@ input.error {
   }
 
   /* Compact 52px header on mobile */
+  /* Compact 52px header on mobile */
   .room-header {
     height: 52px;
-    padding: 0 0.5rem;
+    padding: 0 0.4rem;
+    gap: 0.35rem;
+  }
+
+  .header-left {
+    gap: 0.35rem;
+    min-width: 0;
+    flex-shrink: 1;
   }
 
   .header-logo .logo-text {
     display: none;
   }
 
+  .room-badge-pill {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.7rem;
+    max-width: 95px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .room-badge-label {
+    display: none;
+  }
+
   .header-center {
-    gap: 0.4rem;
+    gap: 0.3rem;
+    flex-shrink: 0;
   }
 
   .run-code-action-btn {
-    padding: 0.32rem 0.6rem;
+    padding: 0.3rem 0.5rem;
     font-size: 0.75rem;
   }
 
+  .run-code-action-btn .run-text {
+    display: none;
+  }
+
+  .call-active-toolbar {
+    padding: 0.15rem 0.25rem;
+    gap: 0.2rem;
+  }
+
   .call-pill-btn {
-    padding: 0.32rem 0.6rem;
-    font-size: 0.75rem;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.72rem;
   }
 
   .call-ctrl-btn {
     width: 28px;
     height: 28px;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
+  }
+
+  .call-ctrl-btn.btn-leave-call {
+    width: auto;
+    min-width: 44px;
+    height: 28px;
+    padding: 0 0.35rem;
+    font-size: 0.7rem;
+  }
+
+  .header-right {
+    gap: 0.3rem;
   }
 
   .header-icon-btn {
-    padding: 0.32rem 0.5rem;
+    padding: 0.3rem 0.45rem;
     font-size: 0.75rem;
   }
 
   .header-primary-btn {
-    padding: 0.32rem 0.55rem;
+    padding: 0.3rem 0.45rem;
     font-size: 0.75rem;
   }
 
