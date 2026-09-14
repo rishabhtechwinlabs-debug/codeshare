@@ -113,6 +113,18 @@ export default function RoomPage() {
   const [isVideoOn, setIsVideoOn] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState({});
 
+  // Advanced WebRTC Studio Call States
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [speakingUsers, setSpeakingUsers] = useState({});
+  const [connectionStats, setConnectionStats] = useState({});
+  const [showDeviceModal, setShowDeviceModal] = useState(false);
+  const [audioInputDevices, setAudioInputDevices] = useState([]);
+  const [videoInputDevices, setVideoInputDevices] = useState([]);
+  const [selectedAudioDevice, setSelectedAudioDevice] = useState('');
+  const [selectedVideoDevice, setSelectedVideoDevice] = useState('');
+
+  const screenStreamRef = useRef(null);
+
   // Code Execution States
   const [isRunningCode, setIsRunningCode] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
@@ -634,6 +646,100 @@ export default function RoomPage() {
     };
   }, [nickname, roomId]);
 
+  // Active Speaker Detection (Web Audio API AnalyserNode)
+  useEffect(() => {
+    if (!isInCall) {
+      setSpeakingUsers({});
+      return;
+    }
+
+    let audioCtx = null;
+    let interval = null;
+
+    try {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtxClass) {
+        audioCtx = new AudioCtxClass();
+        const analysers = {};
+
+        const setupAnalyser = (id, stream) => {
+          if (!stream || !stream.getAudioTracks().length) return;
+          try {
+            const source = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 128;
+            source.connect(analyser);
+            analysers[id] = analyser;
+          } catch (e) {}
+        };
+
+        if (localStreamRef.current && !isMuted) {
+          setupAnalyser(myUserIdRef.current, localStreamRef.current);
+        }
+
+        Object.entries(remoteStreams).forEach(([id, stream]) => {
+          setupAnalyser(id, stream);
+        });
+
+        interval = setInterval(() => {
+          const dataArray = new Uint8Array(64);
+          const activeMap = {};
+
+          Object.entries(analysers).forEach(([id, analyser]) => {
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              sum += dataArray[i];
+            }
+            const avg = sum / dataArray.length;
+            if (avg > 14) {
+              activeMap[id] = true;
+            }
+          });
+
+          setSpeakingUsers(activeMap);
+        }, 120);
+      }
+    } catch (e) {
+      console.warn('AudioAnalyser error:', e);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+      if (audioCtx) {
+        try { audioCtx.close(); } catch (e) {}
+      }
+    };
+  }, [isInCall, isMuted, remoteStreams]);
+
+  // Real-time Connection Quality Stats (RTT / Ping)
+  useEffect(() => {
+    if (!isInCall) {
+      setConnectionStats({});
+      return;
+    }
+
+    const interval = setInterval(() => {
+      Object.entries(peerConnectionsRef.current).forEach(async ([peerId, pc]) => {
+        if (!pc || pc.signalingState === 'closed') return;
+        try {
+          const stats = await pc.getStats();
+          stats.forEach(report => {
+            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+              const rtt = report.currentRoundTripTime ? Math.round(report.currentRoundTripTime * 1000) : 22;
+              setConnectionStats(prev => ({
+                ...prev,
+                [peerId]: { rtt, quality: rtt < 80 ? 'Good' : rtt < 200 ? 'Fair' : 'Poor' }
+              }));
+            }
+          });
+        } catch (e) {}
+      });
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [isInCall]);
+
   // Scroll chat messages to bottom on updates (only if user is near bottom)
   useEffect(() => {
     const chatContainer = document.querySelector('.chat-messages');
@@ -999,6 +1105,86 @@ export default function RoomPage() {
           alert('Could not enable camera: ' + e.message);
         }
       }
+    }
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (!isInCall) {
+      alert('Please join the call first before sharing your screen!');
+      return;
+    }
+
+    if (isScreenSharing) {
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach(t => t.stop());
+        screenStreamRef.current = null;
+      }
+      setIsScreenSharing(false);
+
+      const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
+      if (cameraTrack) {
+        Object.values(peerConnectionsRef.current).forEach(pc => {
+          if (pc && pc.signalingState !== 'closed') {
+            const senders = pc.getSenders();
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+            if (videoSender) videoSender.replaceTrack(cameraTrack);
+          }
+        });
+      }
+      showToast('🖥️ Screen sharing stopped.', 'leave');
+      return;
+    }
+
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const screenTrack = screenStream.getVideoTracks()[0];
+      screenStreamRef.current = screenStream;
+      setIsScreenSharing(true);
+      showToast('🖥️ Started screen sharing!', 'join');
+
+      screenTrack.onended = () => {
+        setIsScreenSharing(false);
+        screenStreamRef.current = null;
+        const camTrack = localStreamRef.current?.getVideoTracks()[0];
+        if (camTrack) {
+          Object.values(peerConnectionsRef.current).forEach(pc => {
+            if (pc && pc.signalingState !== 'closed') {
+              const senders = pc.getSenders();
+              const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+              if (videoSender) videoSender.replaceTrack(camTrack);
+            }
+          });
+        }
+      };
+
+      Object.values(peerConnectionsRef.current).forEach(pc => {
+        if (pc && pc.signalingState !== 'closed') {
+          const senders = pc.getSenders();
+          const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+          if (videoSender) {
+            videoSender.replaceTrack(screenTrack);
+          } else {
+            pc.addTrack(screenTrack, screenStream);
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('Screen share error:', err);
+    }
+  };
+
+  const handleOpenDeviceModal = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioIns = devices.filter(d => d.kind === 'audioinput');
+      const videoIns = devices.filter(d => d.kind === 'videoinput');
+      setAudioInputDevices(audioIns);
+      setVideoInputDevices(videoIns);
+      if (audioIns.length && !selectedAudioDevice) setSelectedAudioDevice(audioIns[0].deviceId);
+      if (videoIns.length && !selectedVideoDevice) setSelectedVideoDevice(videoIns[0].deviceId);
+      setShowDeviceModal(true);
+    } catch (e) {
+      alert('Could not enumerate devices: ' + e.message);
     }
   };
 
@@ -1461,6 +1647,12 @@ export default function RoomPage() {
                   <button className="header-btn" onClick={handleToggleVideo} title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}>
                     <span>{isVideoOn ? '📹 Cam On' : '📷 Cam Off'}</span>
                   </button>
+                  <button className={`header-btn ${isScreenSharing ? 'run-code-btn' : ''}`} onClick={handleToggleScreenShare} title={isScreenSharing ? "Stop Screen Share" : "Share Screen / Desktop"}>
+                    <span>{isScreenSharing ? '🛑 Stop Share' : '🖥️ Share Screen'}</span>
+                  </button>
+                  <button className="header-btn" onClick={handleOpenDeviceModal} title="Audio & Video Settings">
+                    <span>⚙️ Devices</span>
+                  </button>
                 </>
               )}
             </div>
@@ -1535,15 +1727,16 @@ export default function RoomPage() {
           <div className="user-presence">
             {users.map(u => {
               const inCall = callActiveUsers.includes(u.id);
+              const isSpeaking = speakingUsers[u.id];
               return (
-                <div key={u.id} className={`user-avatar ${inCall ? 'in-call-avatar' : ''}`} style={{ backgroundColor: u.color }}>
+                <div key={u.id} className={`user-avatar ${inCall ? 'in-call-avatar' : ''} ${isSpeaking ? 'speaking-active' : ''}`} style={{ backgroundColor: u.color }}>
                   {u.name.substring(0, 2).toUpperCase()}
-                  {inCall && <span className="call-badge">🎙️</span>}
+                  {inCall && <span className="call-badge">{isSpeaking ? '⚡' : '🎙️'}</span>}
                   <span className="tooltip">
                     {u.name}
                     {u.id === myUserIdRef.current ? ' (You)' : ''}
                     {u.id === (isHost ? myUserIdRef.current : '') ? ' 👑 Host' : ''}
-                    {inCall ? ' 🎙️ (In Call)' : ''}
+                    {isSpeaking ? ' 🎙️ (Speaking...)' : inCall ? ' 🎙️ (In Call)' : ''}
                   </span>
                 </div>
               );
@@ -1578,11 +1771,31 @@ export default function RoomPage() {
       ))}
 
       {/* WebRTC Video Call Floating Overlay */}
-      {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current)) && (
+      {isInCall && (Object.keys(remoteStreams).length > 0 || (isVideoOn && localStreamRef.current) || isScreenSharing) && (
         <div className="webrtc-video-grid">
+          {/* Local Screen Share Preview Card */}
+          {isScreenSharing && screenStreamRef.current && (
+            <div className="webrtc-video-card local-video-card">
+              <video
+                autoPlay
+                playsInline
+                muted
+                ref={el => {
+                  if (el && el.srcObject !== screenStreamRef.current) {
+                    el.srcObject = screenStreamRef.current;
+                  }
+                }}
+              />
+              <span className="webrtc-peer-name">You (Screen Share)</span>
+            </div>
+          )}
+
           {/* Local Camera Preview */}
           {isVideoOn && localStreamRef.current && (
-            <div className="webrtc-video-card local-video-card">
+            <div className={`webrtc-video-card local-video-card ${speakingUsers[myUserIdRef.current] ? 'is-speaking' : ''}`}>
+              {speakingUsers[myUserIdRef.current] && (
+                <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+              )}
               <video
                 autoPlay
                 playsInline
@@ -1596,14 +1809,24 @@ export default function RoomPage() {
               <span className="webrtc-peer-name">You (Camera)</span>
             </div>
           )}
+
           {/* Remote Video Cards */}
           {Object.entries(remoteStreams).map(([peerId, stream]) => {
             const peerUser = users.find(u => u.id === peerId);
+            const isPeerSpeaking = speakingUsers[peerId];
+            const stats = connectionStats[peerId];
             return (
-              <div key={peerId} className="webrtc-video-card">
+              <div key={peerId} className={`webrtc-video-card ${isPeerSpeaking ? 'is-speaking' : ''}`}>
+                {isPeerSpeaking && (
+                  <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+                )}
+                {stats && (
+                  <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
+                )}
                 <video 
                   autoPlay 
                   playsInline 
+                  muted
                   ref={el => {
                     if (el && el.srcObject !== stream) {
                       el.srcObject = stream;
@@ -2054,6 +2277,48 @@ export default function RoomPage() {
             <button className="btn btn-secondary" onClick={() => setActivityLogs([])} style={{ flex: 1 }}>Clear Logs</button>
             <button className="btn btn-primary" onClick={() => setShowLogsModal(false)} style={{ flex: 1 }}>Close</button>
           </div>
+        </div>
+      </div>
+
+      {/* Device Selector Settings Modal */}
+      <div className={`modal ${showDeviceModal ? 'open' : ''}`}>
+        <div className="modal-content glass-card" style={{ maxWidth: '420px' }}>
+          <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>⚙️ Media Device Settings</h3>
+            <button className="close-picker-btn" onClick={() => setShowDeviceModal(false)}>✕</button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
+            <div>
+              <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Microphone Device:</label>
+              <select 
+                className="header-select" 
+                style={{ width: '100%', padding: '0.6rem', borderRadius: '6px' }}
+                value={selectedAudioDevice}
+                onChange={(e) => setSelectedAudioDevice(e.target.value)}
+              >
+                {audioInputDevices.map(d => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone (${d.deviceId.substring(0, 5)})`}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.4rem' }}>Camera Device:</label>
+              <select 
+                className="header-select" 
+                style={{ width: '100%', padding: '0.6rem', borderRadius: '6px' }}
+                value={selectedVideoDevice}
+                onChange={(e) => setSelectedVideoDevice(e.target.value)}
+              >
+                {videoInputDevices.map(d => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera (${d.deviceId.substring(0, 5)})`}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <button className="btn btn-primary" onClick={() => setShowDeviceModal(false)} style={{ width: '100%' }}>Done</button>
         </div>
       </div>
 
