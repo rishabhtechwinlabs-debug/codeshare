@@ -247,10 +247,11 @@ app.prepare().then(() => {
 
             currentRoomId = roomId;
             userId = Math.random().toString(36).substring(2, 9);
+            const cleanNickname = (nickname || '').trim().substring(0, 20) || `User-${userId}`;
 
             const userObj = {
               id: userId,
-              name: nickname || `User-${userId}`,
+              name: cleanNickname,
               color: getRandomColor(),
               cursor: null
             };
@@ -279,7 +280,7 @@ app.prepare().then(() => {
           }
 
           case 'code-update': {
-            if (!currentRoomId) return;
+            if (!currentRoomId || typeof data.code !== 'string' || data.code.length > 500000) return;
             const room = rooms.get(currentRoomId);
             if (room) {
               room.code = data.code;
@@ -313,7 +314,7 @@ app.prepare().then(() => {
           }
 
           case 'chat-message': {
-            if (!currentRoomId) return;
+            if (!currentRoomId || typeof data.text !== 'string' || !data.text.trim() || data.text.length > 2000) return;
             const room = rooms.get(currentRoomId);
             if (room) {
               const user = room.users.get(ws);
@@ -324,7 +325,7 @@ app.prepare().then(() => {
                   sender: user.name,
                   senderId: userId,
                   color: user.color,
-                  text: data.text,
+                  text: data.text.trim(),
                   isGif: !!data.isGif,
                   replyTo: data.replyTo || null,
                   reactions: {},
@@ -461,6 +462,20 @@ app.prepare().then(() => {
         }
 
         if (room.users.size === 0) {
+          // Flush pending debounced code saves immediately before deleting room from memory
+          if (codeSaveDebounceTimers.has(currentRoomId)) {
+            clearTimeout(codeSaveDebounceTimers.get(currentRoomId));
+            codeSaveDebounceTimers.delete(currentRoomId);
+            if (supabase) {
+              supabase.from('rooms').upsert({
+                id: currentRoomId,
+                code: room.code,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'id' }).then().catch(err => {
+                console.error('Error flushing final code update on room close:', err.message);
+              });
+            }
+          }
           rooms.delete(currentRoomId);
         } else if (departingUser) {
           broadcastToRoom(currentRoomId, {

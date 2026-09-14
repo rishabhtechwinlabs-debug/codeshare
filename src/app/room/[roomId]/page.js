@@ -333,6 +333,10 @@ export default function RoomPage() {
         editorRef.current.toTextArea();
         editorRef.current = null;
       }
+      remoteCursorsRef.current.forEach(bookmark => {
+        if (bookmark && typeof bookmark.clear === 'function') bookmark.clear();
+      });
+      remoteCursorsRef.current.clear();
     };
   }, [nickname, roomId]);
 
@@ -471,6 +475,7 @@ export default function RoomPage() {
     const apiKey = process.env.NEXT_PUBLIC_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
     try {
       const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=coding&limit=6`);
+      if (!res.ok) throw new Error(`Giphy fetch error: ${res.status}`);
       const result = await res.json();
       if (result.data && result.data.length > 0) {
         setGifs(result.data.map(item => ({
@@ -513,6 +518,7 @@ export default function RoomPage() {
       const apiKey = process.env.NEXT_PUBLIC_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
       try {
         const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=48&rating=r`);
+        if (!res.ok) throw new Error(`Giphy API response error: ${res.status}`);
         const result = await res.json();
         if (result.data && result.data.length > 0) {
           const formatted = result.data.map(item => ({
