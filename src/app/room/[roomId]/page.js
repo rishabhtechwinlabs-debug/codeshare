@@ -20,6 +20,36 @@ const DEFAULT_DEVELOPER_GIFS = [
   { title: "Database Schema", url: "https://user-images.githubusercontent.com/74038190/212281780-0afd9616-8310-46e9-a898-c4f5269f1387.gif" }
 ];
 
+const LANGUAGES = [
+  { id: 'javascript', label: 'JavaScript (Node.js)', extension: '.js', mode: 'javascript' },
+  { id: 'typescript', label: 'TypeScript', extension: '.ts', mode: 'javascript' },
+  { id: 'python', label: 'Python 3', extension: '.py', mode: 'python' },
+  { id: 'cpp', label: 'C++', extension: '.cpp', mode: 'text/x-c++src' },
+  { id: 'c', label: 'C', extension: '.c', mode: 'text/x-csrc' },
+  { id: 'java', label: 'Java', extension: '.java', mode: 'text/x-java' },
+  { id: 'go', label: 'Go', extension: '.go', mode: 'go' },
+  { id: 'rust', label: 'Rust', extension: '.rs', mode: 'rust' },
+  { id: 'html', label: 'HTML5', extension: '.html', mode: 'htmlmixed' },
+  { id: 'css', label: 'CSS3', extension: '.css', mode: 'css' },
+  { id: 'sql', label: 'SQL (SQLite)', extension: '.sql', mode: 'sql' },
+  { id: 'markdown', label: 'Markdown', extension: '.md', mode: 'markdown' },
+  { id: 'shell', label: 'Bash / Shell', extension: '.sh', mode: 'shell' }
+];
+
+const THEMES = [
+  { id: 'dracula', label: 'Dracula (Dark)' },
+  { id: 'monokai', label: 'Monokai' },
+  { id: 'material', label: 'Material' },
+  { id: 'nord', label: 'Nord' },
+  { id: 'one-dark', label: 'One Dark' },
+  { id: 'eclipse', label: 'Eclipse (Light)' }
+];
+
+function getCodeMirrorMode(languageId) {
+  const item = LANGUAGES.find(l => l.id === languageId);
+  return item ? item.mode : 'javascript';
+}
+
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
@@ -35,6 +65,20 @@ export default function RoomPage() {
   const [chatInput, setChatInput] = useState('');
   const [toasts, setToasts] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // Multi-File & Customizer States
+  const [files, setFiles] = useState({
+    'index.js': { content: '// Welcome to HiveCode!\nconsole.log("Hello World");\n', language: 'javascript' }
+  });
+  const [activeFile, setActiveFile] = useState('index.js');
+  const [openTabs, setOpenTabs] = useState(['index.js']);
+  const [showFileExplorer, setShowFileExplorer] = useState(true);
+  const [editorTheme, setEditorTheme] = useState('dracula');
+
+  // Code Execution States
+  const [isRunningCode, setIsRunningCode] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalResult, setTerminalResult] = useState(null);
 
   // Chat Advanced States
   const [typingUsers, setTypingUsers] = useState([]);
@@ -77,6 +121,17 @@ export default function RoomPage() {
   const remoteCursorsRef = useRef(new Map());
   const nicknameRef = useRef('');
 
+  const activeFileRef = useRef('index.js');
+  const filesRef = useRef(files);
+
+  useEffect(() => {
+    activeFileRef.current = activeFile;
+  }, [activeFile]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
   // Setup nickname on mount
   useEffect(() => {
     const savedName = sessionStorage.getItem('nickname');
@@ -88,7 +143,7 @@ export default function RoomPage() {
     }
   }, []);
 
-  // Refresh CodeMirror layout when sidebar collapses/expands to prevent layout glitches
+  // Refresh CodeMirror layout on resize or sidebar collapse
   useEffect(() => {
     if (editorRef.current) {
       const timer = setTimeout(() => {
@@ -96,14 +151,13 @@ export default function RoomPage() {
       }, 310);
       return () => clearTimeout(timer);
     }
-  }, [isSidebarOpen]);
+  }, [isSidebarOpen, showFileExplorer, showTerminal]);
 
   // Toast Helper
   const showToast = (message, type = 'system-join') => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => [...prev, { id, message, type }]);
 
-    // Auto remove after 3s
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3300);
@@ -121,7 +175,7 @@ export default function RoomPage() {
 
   // Main Editor & Socket initialization
   useEffect(() => {
-    if (!nickname || !roomId) return; // Wait for nickname and roomId
+    if (!nickname || !roomId) return;
 
     let checkInterval = null;
     let reconnectTimeout = null;
@@ -153,10 +207,23 @@ export default function RoomPage() {
           switch (data.type) {
             case 'init': {
               myUserIdRef.current = data.userId;
-              if (editor) {
-                isRemoteChangeRef.current = true;
-                editor.setValue(data.code);
-                isRemoteChangeRef.current = false;
+              if (data.files && Object.keys(data.files).length > 0) {
+                setFiles(data.files);
+                const firstFile = data.activeFile || Object.keys(data.files)[0];
+                setActiveFile(firstFile);
+                setOpenTabs([firstFile]);
+
+                if (editor) {
+                  isRemoteChangeRef.current = true;
+                  editor.setValue(data.files[firstFile]?.content || '');
+                  editor.setOption('mode', getCodeMirrorMode(data.files[firstFile]?.language));
+                  isRemoteChangeRef.current = false;
+                }
+              }
+
+              if (data.theme) {
+                setEditorTheme(data.theme);
+                if (editor) editor.setOption('theme', data.theme);
               }
 
               setUsers(data.users);
@@ -170,24 +237,113 @@ export default function RoomPage() {
               setIsAuthRequired(false);
               setAuthError('');
               setIsRoomLocked(!!data.isLocked);
-              if (authPassword) {
-                sessionStorage.setItem('room_pw_' + roomId, authPassword);
-              }
               addActivityLog(`✨ Joined room "${roomId}" as "${nicknameRef.current}"`);
               break;
             }
 
             case 'code-update': {
-              if (data.userId === myUserIdRef.current || !editor) return;
-              isRemoteChangeRef.current = true;
-              const cursor = editor.getCursor();
-              const scrollInfo = editor.getScrollInfo();
+              if (data.userId === myUserIdRef.current) return;
+              
+              const filename = data.filename || activeFileRef.current;
+              
+              setFiles(prev => {
+                const currentFileObj = prev[filename] || { language: 'javascript' };
+                return {
+                  ...prev,
+                  [filename]: { ...currentFileObj, content: data.code }
+                };
+              });
 
-              editor.setValue(data.code);
+              if (filename === activeFileRef.current && editor) {
+                isRemoteChangeRef.current = true;
+                const cursor = editor.getCursor();
+                const scrollInfo = editor.getScrollInfo();
 
-              editor.setCursor(cursor);
-              editor.scrollTo(scrollInfo.left, scrollInfo.top);
-              isRemoteChangeRef.current = false;
+                editor.setValue(data.code);
+
+                editor.setCursor(cursor);
+                editor.scrollTo(scrollInfo.left, scrollInfo.top);
+                isRemoteChangeRef.current = false;
+              }
+              break;
+            }
+
+            case 'file-create': {
+              setFiles(prev => ({
+                ...prev,
+                [data.filename]: { content: data.content || '', language: data.language || 'javascript' }
+              }));
+              setOpenTabs(prev => prev.includes(data.filename) ? prev : [...prev, data.filename]);
+              setActiveFile(data.filename);
+
+              if (editor) {
+                isRemoteChangeRef.current = true;
+                editor.setValue(data.content || '');
+                editor.setOption('mode', getCodeMirrorMode(data.language));
+                isRemoteChangeRef.current = false;
+              }
+              addActivityLog(`📄 New file created: "${data.filename}"`);
+              break;
+            }
+
+            case 'file-delete': {
+              setFiles(prev => {
+                const updated = { ...prev };
+                delete updated[data.filename];
+                return updated;
+              });
+              setOpenTabs(prev => prev.filter(t => t !== data.filename));
+              if (data.activeFile) {
+                setActiveFile(data.activeFile);
+                if (editor) {
+                  isRemoteChangeRef.current = true;
+                  const targetContent = filesRef.current[data.activeFile]?.content || '';
+                  editor.setValue(targetContent);
+                  editor.setOption('mode', getCodeMirrorMode(filesRef.current[data.activeFile]?.language));
+                  isRemoteChangeRef.current = false;
+                }
+              }
+              addActivityLog(`🗑️ File deleted: "${data.filename}"`);
+              break;
+            }
+
+            case 'file-rename': {
+              setFiles(prev => {
+                const updated = { ...prev };
+                if (updated[data.oldFilename]) {
+                  updated[data.newFilename] = updated[data.oldFilename];
+                  delete updated[data.oldFilename];
+                }
+                return updated;
+              });
+              setOpenTabs(prev => prev.map(t => t === data.oldFilename ? data.newFilename : t));
+              if (activeFileRef.current === data.oldFilename) {
+                setActiveFile(data.newFilename);
+              }
+              addActivityLog(`✏️ File renamed: "${data.oldFilename}" → "${data.newFilename}"`);
+              break;
+            }
+
+            case 'language-update': {
+              setFiles(prev => {
+                if (!prev[data.filename]) return prev;
+                return {
+                  ...prev,
+                  [data.filename]: { ...prev[data.filename], language: data.language }
+                };
+              });
+              if (data.filename === activeFileRef.current && editor) {
+                editor.setOption('mode', getCodeMirrorMode(data.language));
+              }
+              addActivityLog(`🔤 Language changed for "${data.filename}": ${data.language}`);
+              break;
+            }
+
+            case 'theme-update': {
+              setEditorTheme(data.theme);
+              if (editor) {
+                editor.setOption('theme', data.theme);
+              }
               break;
             }
 
@@ -203,7 +359,6 @@ export default function RoomPage() {
               setUsers(data.users);
               addActivityLog(`🚪 User "${data.userName}" left the studio`);
 
-              // Clear their cursor bookmark
               if (remoteCursorsRef.current.has(data.userId)) {
                 remoteCursorsRef.current.get(data.userId).clear();
                 remoteCursorsRef.current.delete(data.userId);
@@ -213,7 +368,9 @@ export default function RoomPage() {
 
             case 'cursor-update': {
               if (data.userId === myUserIdRef.current || !editor) return;
-              updateRemoteCursor(editor, data.userId, data.cursor, data.color, data.name);
+              if (data.filename === activeFileRef.current) {
+                updateRemoteCursor(editor, data.userId, data.cursor, data.color, data.name);
+              }
               break;
             }
 
@@ -272,12 +429,11 @@ export default function RoomPage() {
       if (typeof window !== 'undefined' && window.CodeMirror) {
         clearInterval(checkInterval);
 
-        // Only create editor if not already initialized
         if (!editorRef.current) {
           const editor = window.CodeMirror.fromTextArea(document.getElementById('code-editor'), {
             lineNumbers: true,
-            theme: 'dracula',
-            mode: null, // Plain Text mode
+            theme: editorTheme,
+            mode: getCodeMirrorMode(filesRef.current[activeFileRef.current]?.language || 'javascript'),
             tabSize: 2,
             lineWrapping: true,
             matchBrackets: true,
@@ -285,11 +441,11 @@ export default function RoomPage() {
           });
           editorRef.current = editor;
 
-          // Local editor event listeners
           editor.on('change', () => {
             if (isRemoteChangeRef.current || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
             socketRef.current.send(JSON.stringify({
               type: 'code-update',
+              filename: activeFileRef.current,
               code: editor.getValue()
             }));
           });
@@ -298,6 +454,7 @@ export default function RoomPage() {
             if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
             socketRef.current.send(JSON.stringify({
               type: 'cursor-update',
+              filename: activeFileRef.current,
               cursor: editor.getCursor()
             }));
           });
@@ -351,11 +508,139 @@ export default function RoomPage() {
     }
   }, [chatMessages]);
 
+  // Handle Switch Active File
+  const handleSwitchFile = (filename) => {
+    if (!files[filename]) return;
+    setActiveFile(filename);
+    if (!openTabs.includes(filename)) {
+      setOpenTabs(prev => [...prev, filename]);
+    }
+    if (editorRef.current) {
+      isRemoteChangeRef.current = true;
+      editorRef.current.setValue(files[filename].content || '');
+      editorRef.current.setOption('mode', getCodeMirrorMode(files[filename].language));
+      isRemoteChangeRef.current = false;
+    }
+  };
+
+  // Handle Create File
+  const handleCreateFile = () => {
+    const filename = prompt('Enter new filename (e.g. app.py, script.js, styles.css):');
+    if (!filename || !filename.trim()) return;
+
+    const cleanName = filename.trim();
+    if (files[cleanName]) {
+      alert('A file with this name already exists!');
+      return;
+    }
+
+    const ext = cleanName.substring(cleanName.lastIndexOf('.')).toLowerCase();
+    const matchedLang = LANGUAGES.find(l => l.extension === ext);
+    const langId = matchedLang ? matchedLang.id : 'javascript';
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'file-create',
+        filename: cleanName,
+        content: '',
+        language: langId
+      }));
+    }
+  };
+
+  // Handle Delete File
+  const handleDeleteFile = (filename, e) => {
+    if (e) e.stopPropagation();
+    if (Object.keys(files).length <= 1) {
+      alert('Cannot delete the only file in the project!');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete "${filename}"?`)) return;
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'file-delete',
+        filename: filename
+      }));
+    }
+  };
+
+  // Handle Language Change
+  const handleLanguageChange = (newLanguage) => {
+    if (!files[activeFile]) return;
+    setFiles(prev => ({
+      ...prev,
+      [activeFile]: { ...prev[activeFile], language: newLanguage }
+    }));
+    if (editorRef.current) {
+      editorRef.current.setOption('mode', getCodeMirrorMode(newLanguage));
+    }
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'language-update',
+        filename: activeFile,
+        language: newLanguage
+      }));
+    }
+  };
+
+  // Handle Theme Change
+  const handleThemeChange = (newTheme) => {
+    setEditorTheme(newTheme);
+    if (editorRef.current) {
+      editorRef.current.setOption('theme', newTheme);
+    }
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'theme-update',
+        theme: newTheme
+      }));
+    }
+  };
+
+  // Handle Code Execution (Piston API Runner)
+  const handleRunCode = async () => {
+    const currentCode = editorRef.current ? editorRef.current.getValue() : files[activeFile]?.content;
+    const currentLang = files[activeFile]?.language || 'javascript';
+
+    if (!currentCode || !currentCode.trim()) {
+      showToast('⚠️ Editor is empty!', 'leave');
+      return;
+    }
+
+    setIsRunningCode(true);
+    setShowTerminal(true);
+    setTerminalResult({ output: '🚀 Compiling and executing code in sandbox...', executionTime: 0 });
+
+    try {
+      const res = await fetch('/api/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          language: currentLang,
+          code: currentCode,
+          filename: activeFile
+        })
+      });
+
+      const data = await res.json();
+      setTerminalResult(data);
+    } catch (err) {
+      setTerminalResult({
+        output: '',
+        stderr: `Execution Error: ${err.message}`,
+        executionTime: 0
+      });
+    } finally {
+      setIsRunningCode(false);
+    }
+  };
+
   // Update Remote User Cursor
   function updateRemoteCursor(editor, userId, cursor, color, name) {
     const cursorsMap = remoteCursorsRef.current;
 
-    // Clear old bookmark
     if (cursorsMap.has(userId)) {
       cursorsMap.get(userId).clear();
       cursorsMap.delete(userId);
@@ -384,14 +669,14 @@ export default function RoomPage() {
 
   // Typing state control
   const sendTypingStart = () => {
-    if (!isTypingRef.current && socketRef.current && socketRef.current.readyState === 1) {
+    if (!isTypingRef.current && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       isTypingRef.current = true;
       socketRef.current.send(JSON.stringify({ type: 'typing-start' }));
     }
   };
 
   const sendTypingStop = () => {
-    if (isTypingRef.current && socketRef.current && socketRef.current.readyState === 1) {
+    if (isTypingRef.current && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       isTypingRef.current = false;
       socketRef.current.send(JSON.stringify({ type: 'typing-stop' }));
     }
@@ -425,7 +710,6 @@ export default function RoomPage() {
       const deltaX = e.clientX - dragStartXRef.current;
       const newWidth = dragStartWidthRef.current - deltaX;
       
-      // Bounds: min 300px, max 650px
       if (newWidth >= 300 && newWidth <= 650) {
         setSidebarWidth(newWidth);
         if (editorRef.current) {
@@ -505,9 +789,7 @@ export default function RoomPage() {
       return;
     }
 
-    // Debounce API requests by 500ms
     gifDebounceTimeoutRef.current = setTimeout(async () => {
-      // Check client-side query cache first
       const normalizedQuery = query.trim().toLowerCase();
       if (gifCacheRef.current[normalizedQuery]) {
         setGifs(gifCacheRef.current[normalizedQuery]);
@@ -526,11 +808,9 @@ export default function RoomPage() {
             url: item.images.downsized_medium?.url || item.images.original?.url
           }));
           
-          // Cache the formatted result set
           gifCacheRef.current[normalizedQuery] = formatted;
           setGifs(formatted);
         } else {
-          // Fallback to client-side local search filtering
           const filtered = DEFAULT_DEVELOPER_GIFS.filter(gif =>
             gif.title.toLowerCase().includes(query.toLowerCase())
           );
@@ -562,7 +842,6 @@ export default function RoomPage() {
     }
   };
 
-  // Clipboard Copier
   const handleShare = () => {
     const shareUrl = window.location.href;
     navigator.clipboard.writeText(shareUrl).then(() => {
@@ -572,7 +851,6 @@ export default function RoomPage() {
     });
   };
 
-  // Send Messages inside Chat
   const handleSendChat = (customText = null, isGif = false) => {
     const textObj = customText !== null ? customText : chatInput;
     const text = typeof textObj === 'string' ? textObj.trim() : '';
@@ -633,7 +911,6 @@ export default function RoomPage() {
     setShowLockModal(false);
   };
 
-  // Submit Modal Nickname Form
   const handleModalSubmit = () => {
     const nameVal = modalNickname.trim();
     if (nameVal) {
@@ -667,17 +944,55 @@ export default function RoomPage() {
           <div className="room-info">
             <span className="room-label">ROOM:</span>
             <span className="room-id">{roomId || '--------'}</span>
+
+            {/* Run Code Button */}
+            <button className="header-btn run-code-btn" onClick={handleRunCode} disabled={isRunningCode} title="Execute Code in Sandbox Console">
+              <span>{isRunningCode ? '⏳ Running...' : '▶️ Run Code'}</span>
+            </button>
+
+            {/* Language Selector */}
+            <select 
+              className="header-select"
+              value={files[activeFile]?.language || 'javascript'}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              title="Select Programming Language"
+            >
+              {LANGUAGES.map(lang => (
+                <option key={lang.id} value={lang.id}>{lang.label}</option>
+              ))}
+            </select>
+
+            {/* Theme Selector */}
+            <select 
+              className="header-select"
+              value={editorTheme}
+              onChange={(e) => handleThemeChange(e.target.value)}
+              title="Select Editor Theme"
+            >
+              {THEMES.map(t => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+
             <button className="header-btn" onClick={handleShare} title="Copy Share Link">
               <span className="btn-text">Share Link</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
+
             <button className={`header-btn lock-btn ${isRoomLocked ? 'locked' : ''}`} onClick={() => setShowLockModal(true)} title={isRoomLocked ? "Room is Password Protected" : "Set Password"}>
               <span>{isRoomLocked ? '🔒 Locked' : '🔓 Unlocked'}</span>
             </button>
+
+            <button className="header-btn" onClick={() => setShowFileExplorer(!showFileExplorer)} title={showFileExplorer ? "Hide Files" : "Show Files"}>
+              <span>📁</span>
+              <span className="btn-text">{showFileExplorer ? ' Files' : ' Files'}</span>
+            </button>
+
             <button className="header-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)} title={isSidebarOpen ? "Hide Chat" : "Show Chat"}>
               <span>💬</span>
               <span className="btn-text">{isSidebarOpen ? ' Hide Chat' : ' Show Chat'}</span>
             </button>
+
             <button className="header-btn log-toggle-btn" onClick={() => setShowLogsModal(true)} title="Activity Logs">
               <span>📋</span>
               <span className="btn-text"> Logs</span>
@@ -699,9 +1014,92 @@ export default function RoomPage() {
 
       {/* Workspace */}
       <div className="workspace">
+        {/* File Explorer Sidebar */}
+        {showFileExplorer && (
+          <div className="file-explorer-sidebar">
+            <div className="file-explorer-header">
+              <span>FILES</span>
+              <button className="add-file-btn" onClick={handleCreateFile} title="Create New File">+</button>
+            </div>
+            <div className="file-list">
+              {Object.keys(files).map(filename => (
+                <div 
+                  key={filename}
+                  className={`file-item ${filename === activeFile ? 'active' : ''}`}
+                  onClick={() => handleSwitchFile(filename)}
+                >
+                  <span>📄 {filename}</span>
+                  <div className="file-item-actions">
+                    <button className="file-action-icon" onClick={(e) => handleDeleteFile(filename, e)} title="Delete File">🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Editor Pane */}
-        <div className="pane editor-pane">
-          <textarea id="code-editor" style={{ display: 'none' }}></textarea>
+        <div className="pane editor-pane" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {/* File Tab Strip */}
+          <div className="file-tab-bar">
+            {openTabs.map(tabFile => (
+              <div 
+                key={tabFile}
+                className={`file-tab ${tabFile === activeFile ? 'active' : ''}`}
+                onClick={() => handleSwitchFile(tabFile)}
+              >
+                <span>📄 {tabFile}</span>
+                {openTabs.length > 1 && (
+                  <button 
+                    className="file-tab-close" 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenTabs(prev => prev.filter(t => t !== tabFile));
+                      if (activeFile === tabFile) {
+                        const remaining = openTabs.filter(t => t !== tabFile);
+                        if (remaining.length > 0) handleSwitchFile(remaining[0]);
+                      }
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+            <textarea id="code-editor" style={{ display: 'none' }}></textarea>
+          </div>
+
+          {/* Live Terminal Console Drawer */}
+          {showTerminal && (
+            <div className="terminal-drawer">
+              <div className="terminal-header">
+                <span>🖥️ LIVE CONSOLE OUTPUT ({files[activeFile]?.language?.toUpperCase() || 'SANDBOX'})</span>
+                <button className="close-picker-btn" onClick={() => setShowTerminal(false)}>✕</button>
+              </div>
+              <div className="terminal-output">
+                {isRunningCode ? (
+                  <div style={{ color: '#60a5fa' }}>⏳ Executing code in remote sandbox...</div>
+                ) : terminalResult ? (
+                  <div>
+                    {terminalResult.stdout && <div className="terminal-stdout">{terminalResult.stdout}</div>}
+                    {terminalResult.stderr && <div className="terminal-stderr">{terminalResult.stderr}</div>}
+                    {!terminalResult.stdout && !terminalResult.stderr && (
+                      <div style={{ color: '#94a3b8' }}>{terminalResult.output || 'Code executed with no output returned.'}</div>
+                    )}
+                    {terminalResult.error && <div className="terminal-stderr">{terminalResult.error}</div>}
+                    <div className="terminal-meta">
+                      ⏱️ Runtime: {terminalResult.executionTime || 0}ms | Exit Code: {terminalResult.code ?? 0}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ color: '#94a3b8' }}>Click "▶️ Run Code" in the top bar to execute code.</div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Resizer Handle */}

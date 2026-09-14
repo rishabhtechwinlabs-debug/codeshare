@@ -1524,9 +1524,227 @@ input.error {
 .sidebar-pane.no-transition {
   transition: none !important;
 }
-body.resizing {
-  cursor: col-resize !important;
-  user-select: none !important;
+/* Header Dropdown Selectors */
+.header-select {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+}
+.header-select:hover, .header-select:focus {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--primary-color);
+}
+.header-select option {
+  background: #181e2e;
+  color: #fff;
+}
+
+/* Run Code Button */
+.run-code-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+}
+.run-code-btn:hover {
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.5) !important;
+}
+
+/* File Tab Bar */
+.file-tab-bar {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  user-select: none;
+}
+.file-tab-bar::-webkit-scrollbar {
+  height: 3px;
+}
+.file-tab-bar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+.file-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.2);
+  border-right: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.file-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-color);
+}
+.file-tab.active {
+  background: #121826;
+  color: var(--primary-color);
+  font-weight: 600;
+  border-bottom: 2px solid var(--primary-color);
+}
+.file-tab-close {
+  opacity: 0.5;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.2rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.file-tab-close:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* File Explorer Sidebar Panel */
+.file-explorer-sidebar {
+  width: 200px;
+  background: rgba(12, 16, 26, 0.95);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  user-select: none;
+}
+.file-explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-color);
+}
+.add-file-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
+  color: #fff;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.15s ease;
+}
+.add-file-btn:hover {
+  background: var(--primary-color);
+}
+.file-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0.4rem;
+  gap: 0.2rem;
+  overflow-y: auto;
+  flex: 1;
+}
+.file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.file-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+.file-item.active {
+  background: rgba(0, 212, 255, 0.12);
+  color: var(--primary-color);
+  font-weight: 600;
+}
+.file-item-actions {
+  display: opacity;
+  opacity: 0;
+  gap: 0.2rem;
+  transition: opacity 0.15s ease;
+}
+.file-item:hover .file-item-actions {
+  opacity: 1;
+}
+.file-action-icon {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 0.1rem 0.25rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.file-action-icon:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Live Terminal Drawer */
+.terminal-drawer {
+  background: #0a0d14;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  transition: height 0.25s ease;
+  overflow: hidden;
+}
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.8rem;
+  background: rgba(0, 0, 0, 0.5);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  letter-spacing: 0.05em;
+}
+.terminal-output {
+  flex: 1;
+  padding: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  overflow-y: auto;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.terminal-stdout {
+  color: #34d399;
+}
+.terminal-stderr {
+  color: #f87171;
+}
+.terminal-meta {
+  color: #94a3b8;
+  font-size: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
 }
 
 /* Responsive design */

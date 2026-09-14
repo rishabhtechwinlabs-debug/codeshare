@@ -10,11 +10,10 @@ const handle = app.getRequestHandler();
 
 const PORT = process.env.PORT || 3000;
 
-// Map of roomId -> { code: string, users: Map(ws -> { id: string, name: string, color: string, cursor: object }), messages: Array, typingUsers: Map, password: string|null }
+// Map of roomId -> { files: object, users: Map, messages: Array, typingUsers: Map, password: string|null, theme: string }
 const rooms = new Map();
-const codeSaveDebounceTimers = new Map(); // roomId -> setTimeout handle
+const fileSaveDebounceTimers = new Map(); // roomId -> setTimeout handle
 
-// Helper to generate a random bright color for users
 function getRandomColor() {
   const colors = [
     '#ff5733', '#33ff57', '#3357ff', '#f3ff33', '#ff33f3',
@@ -24,7 +23,6 @@ function getRandomColor() {
   return colors[Math.floor(Math.random() * colors.length)];
 }
 
-// Broadcast to all clients in a room except optionally the sender
 function broadcastToRoom(roomId, messageObj, excludeWs = null) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -37,21 +35,28 @@ function broadcastToRoom(roomId, messageObj, excludeWs = null) {
   }
 }
 
-// Get user list in a room as a clean array for serialization
 function getUserList(roomId) {
   const room = rooms.get(roomId);
   if (!room) return [];
   return Array.from(room.users.values());
 }
 
-// Supabase DB Persistence Helpers
 async function getOrLoadRoom(roomId) {
   if (rooms.has(roomId)) {
     return rooms.get(roomId);
   }
 
+  const defaultFiles = {
+    'index.js': {
+      content: '// Welcome to HiveCode! Share this URL with others to collaborate.\nconsole.log("Hello World from HiveCode!");\n',
+      language: 'javascript'
+    }
+  };
+
   const roomData = {
-    code: '// Welcome to HiveCode! Share this URL with others to collaborate.\n',
+    files: defaultFiles,
+    activeFile: 'index.js',
+    theme: 'dracula',
     users: new Map(),
     messages: [],
     typingUsers: new Map(),
@@ -67,7 +72,14 @@ async function getOrLoadRoom(roomId) {
         .single();
 
       if (dbRoom) {
-        roomData.code = dbRoom.code || roomData.code;
+        if (dbRoom.files && Object.keys(dbRoom.files).length > 0) {
+          roomData.files = dbRoom.files;
+          roomData.activeFile = Object.keys(dbRoom.files)[0];
+        } else if (dbRoom.code) {
+          roomData.files = {
+            'index.js': { content: dbRoom.code, language: 'javascript' }
+          };
+        }
         roomData.password = dbRoom.password || null;
 
         const { data: dbMessages } = await supabase
@@ -92,7 +104,7 @@ async function getOrLoadRoom(roomId) {
         }
       }
     } catch (err) {
-      // Room load fallback
+      // Supabase load fallback
     }
   }
 
@@ -100,30 +112,32 @@ async function getOrLoadRoom(roomId) {
   return roomData;
 }
 
-function scheduleCodeSave(roomId, code) {
+function scheduleFileSave(roomId, files) {
   if (!supabase) return;
 
-  if (codeSaveDebounceTimers.has(roomId)) {
-    clearTimeout(codeSaveDebounceTimers.get(roomId));
+  if (fileSaveDebounceTimers.has(roomId)) {
+    clearTimeout(fileSaveDebounceTimers.get(roomId));
   }
 
   const timer = setTimeout(async () => {
     try {
+      const defaultCode = files['index.js']?.content || Object.values(files)[0]?.content || '';
       await supabase
         .from('rooms')
         .upsert({
           id: roomId,
-          code: code,
+          files: files,
+          code: defaultCode,
           updated_at: new Date().toISOString()
         }, { onConflict: 'id' });
     } catch (err) {
-      console.error(`Error saving room code for ${roomId}:`, err.message);
+      console.error(`Error saving room files for ${roomId}:`, err.message);
     } finally {
-      codeSaveDebounceTimers.delete(roomId);
+      fileSaveDebounceTimers.delete(roomId);
     }
   }, 2000);
 
-  codeSaveDebounceTimers.set(roomId, timer);
+  fileSaveDebounceTimers.set(roomId, timer);
 }
 
 async function saveMessageToDB(roomId, msgObj) {
@@ -197,7 +211,6 @@ app.prepare().then(() => {
 
   const wss = new WebSocket.Server({ noServer: true });
 
-  // Heartbeat ping interval (30s) to terminate dead/unresponsive connections
   const heartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
@@ -232,7 +245,6 @@ app.prepare().then(() => {
             let isNewRoom = !rooms.has(roomId);
             const room = await getOrLoadRoom(roomId);
 
-            // Verify Password
             if (room.password && password !== room.password) {
               ws.send(JSON.stringify({
                 type: 'auth-required',
@@ -258,10 +270,11 @@ app.prepare().then(() => {
 
             room.users.set(ws, userObj);
 
-            // Send current state to joining user
             ws.send(JSON.stringify({
               type: 'init',
-              code: room.code,
+              files: room.files,
+              activeFile: room.activeFile || Object.keys(room.files)[0],
+              theme: room.theme || 'dracula',
               userId: userId,
               users: getUserList(roomId),
               messages: room.messages,
@@ -269,7 +282,6 @@ app.prepare().then(() => {
               isLocked: !!room.password
             }));
 
-            // Notify existing room members of new join
             broadcastToRoom(roomId, {
               type: 'user-joined',
               user: userObj,
@@ -283,13 +295,126 @@ app.prepare().then(() => {
             if (!currentRoomId || typeof data.code !== 'string' || data.code.length > 500000) return;
             const room = rooms.get(currentRoomId);
             if (room) {
-              room.code = data.code;
-              scheduleCodeSave(currentRoomId, data.code);
+              const filename = data.filename || room.activeFile || 'index.js';
+              if (!room.files[filename]) {
+                room.files[filename] = { content: '', language: 'javascript' };
+              }
+              room.files[filename].content = data.code;
+              scheduleFileSave(currentRoomId, room.files);
+
               broadcastToRoom(currentRoomId, {
                 type: 'code-update',
+                filename: filename,
                 code: data.code,
                 userId: userId
               }, ws);
+            }
+            break;
+          }
+
+          case 'file-create': {
+            if (!currentRoomId || typeof data.filename !== 'string') return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              const filename = data.filename.trim();
+              if (filename && !room.files[filename]) {
+                room.files[filename] = {
+                  content: data.content || '',
+                  language: data.language || 'javascript'
+                };
+                room.activeFile = filename;
+                scheduleFileSave(currentRoomId, room.files);
+
+                broadcastToRoom(currentRoomId, {
+                  type: 'file-create',
+                  filename: filename,
+                  content: room.files[filename].content,
+                  language: room.files[filename].language,
+                  userId: userId
+                });
+              }
+            }
+            break;
+          }
+
+          case 'file-delete': {
+            if (!currentRoomId || typeof data.filename !== 'string') return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              const filename = data.filename.trim();
+              if (room.files[filename] && Object.keys(room.files).length > 1) {
+                delete room.files[filename];
+                if (room.activeFile === filename) {
+                  room.activeFile = Object.keys(room.files)[0];
+                }
+                scheduleFileSave(currentRoomId, room.files);
+
+                broadcastToRoom(currentRoomId, {
+                  type: 'file-delete',
+                  filename: filename,
+                  activeFile: room.activeFile,
+                  userId: userId
+                });
+              }
+            }
+            break;
+          }
+
+          case 'file-rename': {
+            if (!currentRoomId || typeof data.oldFilename !== 'string' || typeof data.newFilename !== 'string') return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              const oldName = data.oldFilename.trim();
+              const newName = data.newFilename.trim();
+              if (oldName && newName && room.files[oldName] && !room.files[newName]) {
+                room.files[newName] = room.files[oldName];
+                delete room.files[oldName];
+                if (room.activeFile === oldName) {
+                  room.activeFile = newName;
+                }
+                scheduleFileSave(currentRoomId, room.files);
+
+                broadcastToRoom(currentRoomId, {
+                  type: 'file-rename',
+                  oldFilename: oldName,
+                  newFilename: newName,
+                  userId: userId
+                });
+              }
+            }
+            break;
+          }
+
+          case 'language-update': {
+            if (!currentRoomId || typeof data.language !== 'string') return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              const filename = data.filename || room.activeFile || 'index.js';
+              if (room.files[filename]) {
+                room.files[filename].language = data.language;
+                scheduleFileSave(currentRoomId, room.files);
+
+                broadcastToRoom(currentRoomId, {
+                  type: 'language-update',
+                  filename: filename,
+                  language: data.language,
+                  userId: userId
+                });
+              }
+            }
+            break;
+          }
+
+          case 'theme-update': {
+            if (!currentRoomId || typeof data.theme !== 'string') return;
+            const room = rooms.get(currentRoomId);
+            if (room) {
+              room.theme = data.theme;
+              broadcastToRoom(currentRoomId, {
+                type: 'theme-update',
+                theme: data.theme,
+                userId: userId
+              });
             }
             break;
           }
@@ -305,6 +430,7 @@ app.prepare().then(() => {
                   type: 'cursor-update',
                   userId: userId,
                   cursor: data.cursor,
+                  filename: data.filename || room.activeFile,
                   color: user.color,
                   name: user.name
                 }, ws);
@@ -462,14 +588,15 @@ app.prepare().then(() => {
         }
 
         if (room.users.size === 0) {
-          // Flush pending debounced code saves immediately before deleting room from memory
-          if (codeSaveDebounceTimers.has(currentRoomId)) {
-            clearTimeout(codeSaveDebounceTimers.get(currentRoomId));
-            codeSaveDebounceTimers.delete(currentRoomId);
+          if (fileSaveDebounceTimers.has(currentRoomId)) {
+            clearTimeout(fileSaveDebounceTimers.get(currentRoomId));
+            fileSaveDebounceTimers.delete(currentRoomId);
             if (supabase) {
+              const defaultCode = room.files['index.js']?.content || Object.values(room.files)[0]?.content || '';
               supabase.from('rooms').upsert({
                 id: currentRoomId,
-                code: room.code,
+                files: room.files,
+                code: defaultCode,
                 updated_at: new Date().toISOString()
               }, { onConflict: 'id' }).then().catch(err => {
                 console.error('Error flushing final code update on room close:', err.message);
