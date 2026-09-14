@@ -454,6 +454,9 @@ input[type="text"]:focus {
 /* ROOM SPECIFIC */
 .room-body {
   height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3024,7 +3027,10 @@ input.error {
   /* Full Screen Mobile Views */
   .workspace {
     position: relative;
-    height: calc(100vh - 52px - 56px); /* minus header, minus mobile nav */
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
     overflow: hidden;
   }
 
@@ -3067,12 +3073,16 @@ input.error {
     display: none !important;
   }
 
-  .workspace[data-mobile-view="chat"] .sidebar-pane {
+  .workspace[data-mobile-view="chat"] .sidebar-pane,
+  .workspace[data-mobile-view="chat"] .sidebar-pane.collapsed {
     display: flex !important;
+    flex-direction: column !important;
     position: static !important;
     width: 100% !important;
     min-width: 100% !important;
     max-width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
     border-left: none !important;
     transform: none !important;
     opacity: 1 !important;
@@ -3082,6 +3092,36 @@ input.error {
   .workspace[data-mobile-view="chat"] .file-explorer-sidebar,
   .workspace[data-mobile-view="chat"] .sidebar-resizer {
     display: none !important;
+  }
+
+  /* Mobile Chat Input Bar */
+  .workspace[data-mobile-view="chat"] .chat-input-wrapper {
+    background: #0b1120 !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+    flex-shrink: 0 !important;
+    position: relative;
+    z-index: 30;
+  }
+
+  .workspace[data-mobile-view="chat"] .chat-input-area {
+    padding: 0.5rem 0.6rem;
+    gap: 0.4rem;
+  }
+
+  .workspace[data-mobile-view="chat"] .chat-input-area input {
+    font-size: 16px !important; /* Prevents auto-zoom on iOS Safari */
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 20px;
+    color: #fff;
+  }
+
+  .workspace[data-mobile-view="chat"] .chat-input-area .send-msg-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 50%;
   }
 
   .workspace[data-mobile-view="terminal"] .editor-pane {
@@ -3098,22 +3138,21 @@ input.error {
     display: none !important;
   }
 
-  /* Fixed Bottom Mobile Navigation Bar */
+  /* Mobile Navigation Bar in Flex Document Flow */
   .mobile-nav-bar {
     display: flex;
     align-items: center;
     justify-content: space-around;
-    height: 56px;
-    background: rgba(10, 14, 26, 0.95);
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    min-height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding: 0 0.5rem env(safe-area-inset-bottom, 0px) 0.5rem;
+    background: rgba(10, 14, 26, 0.98);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border-top: 1px solid var(--border-color);
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    position: relative;
+    flex-shrink: 0;
     z-index: 150;
-    padding: 0 0.5rem;
   }
 
   .mobile-nav-item {

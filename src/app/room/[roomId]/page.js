@@ -2356,7 +2356,14 @@ export default function RoomPage() {
           {/* Chat Toggle Button */}
           <button 
             className={`header-icon-btn chat-toggle-btn ${isSidebarOpen ? 'active' : ''}`}
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+                setIsSidebarOpen(true);
+                setMobileActiveView(mobileActiveView === 'chat' ? 'editor' : 'chat');
+              } else {
+                setIsSidebarOpen(!isSidebarOpen);
+              }
+            }} 
             title={isSidebarOpen ? "Hide Chat Sidebar" : "Show Chat Sidebar"}
           >
             <span>💬</span>
@@ -2751,7 +2758,10 @@ export default function RoomPage() {
 
         <button 
           className={`mobile-nav-item ${mobileActiveView === 'chat' ? 'active' : ''}`}
-          onClick={() => setMobileActiveView('chat')}
+          onClick={() => {
+            setIsSidebarOpen(true);
+            setMobileActiveView('chat');
+          }}
         >
           <span className="nav-icon">💬</span>
           <span className="nav-label">Chat</span>
