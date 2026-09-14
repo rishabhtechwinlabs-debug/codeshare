@@ -146,6 +146,17 @@ async function saveMessageToDB(roomId, msgObj) {
   }
 }
 
+async function updateMessageReactionsInDB(messageId, reactions) {
+  if (!supabase) return;
+  try {
+    await supabase.from('messages').update({
+      reactions: reactions || {}
+    }).eq('id', messageId);
+  } catch (err) {
+    console.error('Error updating reactions in Supabase:', err.message);
+  }
+}
+
 async function updateRoomPasswordInDB(roomId, password) {
   if (!supabase) return;
   try {
@@ -361,6 +372,8 @@ app.prepare().then(() => {
                   } else {
                     msgObj.reactions[emoji].push(user.name);
                   }
+
+                  updateMessageReactionsInDB(messageId, msgObj.reactions);
 
                   broadcastToRoom(currentRoomId, {
                     type: 'chat-reaction-update',

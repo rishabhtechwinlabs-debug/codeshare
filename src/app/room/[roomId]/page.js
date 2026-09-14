@@ -336,11 +336,14 @@ export default function RoomPage() {
     };
   }, [nickname, roomId]);
 
-  // Scroll chat messages to bottom on updates
+  // Scroll chat messages to bottom on updates (only if user is near bottom)
   useEffect(() => {
     const chatContainer = document.querySelector('.chat-messages');
     if (chatContainer) {
-      chatContainer.scrollTop = chatContainer.scrollHeight;
+      const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 150;
+      if (isNearBottom) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
     }
   }, [chatMessages]);
 
