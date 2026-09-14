@@ -346,12 +346,19 @@ export default function RoomPage() {
                 }
               });
 
-              // 2. Deterministically initiate peer connections to any newly joined call participants
+              // 2. Deterministically initiate peer connections to any active call participants
               if (isInCallRef.current && localStreamRef.current) {
                 newActiveUsers.forEach(peerId => {
-                  if (peerId !== myUserIdRef.current && !peerConnectionsRef.current[peerId]) {
-                    const shouldInitiate = myUserIdRef.current < peerId;
-                    createPeerConnection(peerId, shouldInitiate);
+                  if (peerId !== myUserIdRef.current) {
+                    const existingPc = peerConnectionsRef.current[peerId];
+                    const isHealthy = existingPc &&
+                      existingPc.signalingState !== 'closed' &&
+                      existingPc.connectionState !== 'failed' &&
+                      existingPc.connectionState !== 'closed';
+                    if (!isHealthy) {
+                      const shouldInitiate = myUserIdRef.current < peerId;
+                      createPeerConnection(peerId, shouldInitiate);
+                    }
                   }
                 });
               }
@@ -836,7 +843,8 @@ export default function RoomPage() {
   };
 
   const addIceCandidateSafely = async (pc, targetUserId, candidate) => {
-    if (pc.remoteDescription && pc.remoteDescription.type) {
+    if (!candidate || !candidate.candidate) return;
+    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (e) {
@@ -852,14 +860,15 @@ export default function RoomPage() {
 
   const flushPendingIceCandidates = async (pc, targetUserId) => {
     const candidates = pendingIceCandidatesRef.current[targetUserId] || [];
+    pendingIceCandidatesRef.current[targetUserId] = [];
     for (const candidate of candidates) {
+      if (!candidate || !candidate.candidate) continue;
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (e) {
         console.error('Error flushing candidate:', e);
       }
     }
-    pendingIceCandidatesRef.current[targetUserId] = [];
   };
 
   const handleToggleCall = async () => {
@@ -967,18 +976,38 @@ export default function RoomPage() {
 
   const createPeerConnection = (targetUserId, isInitiator) => {
     let pc = peerConnectionsRef.current[targetUserId];
-    if (pc && pc.signalingState !== 'closed') {
+    if (pc && pc.signalingState !== 'closed' && pc.connectionState !== 'failed' && pc.iceConnectionState !== 'failed') {
       ensureLocalTracksOnPeerConnection(pc);
       return pc;
     }
 
+    if (pc) {
+      try { pc.close(); } catch (e) {}
+      delete peerConnectionsRef.current[targetUserId];
+    }
+
+    // Comprehensive STUN and TURN configuration for 100% NAT & Firewall traversal
     pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
-        { urls: 'stun:openrelay.metered.ca:80' }
+        { urls: 'stun:openrelay.metered.ca:80' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
       ],
       iceCandidatePoolSize: 10,
       bundlePolicy: 'max-bundle',
@@ -987,23 +1016,38 @@ export default function RoomPage() {
 
     ensureLocalTracksOnPeerConnection(pc);
 
-    // Track WebRTC connection lifecycle states
+    // Track WebRTC connection lifecycle states with automated recovery
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: state }));
+
       if (state === 'failed') {
-        try {
-          pc.restartIce();
-        } catch (e) {}
+        console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed. Auto-recovering...`);
+        setTimeout(() => {
+          if (isInCallRef.current && activeCallUsersRef.current.includes(targetUserId)) {
+            try { pc.close(); } catch (e) {}
+            delete peerConnectionsRef.current[targetUserId];
+            const shouldInitiate = myUserIdRef.current < targetUserId;
+            createPeerConnection(targetUserId, shouldInitiate);
+          }
+        }, 1500);
       }
     };
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      if (event.candidate && event.candidate.candidate && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({
           type: 'webrtc-signal',
           targetUserId: targetUserId,
-          signal: { type: 'candidate', candidate: event.candidate }
+          signal: {
+            type: 'candidate',
+            candidate: {
+              candidate: event.candidate.candidate,
+              sdpMid: event.candidate.sdpMid,
+              sdpMLineIndex: event.candidate.sdpMLineIndex,
+              usernameFragment: event.candidate.usernameFragment
+            }
+          }
         }));
       }
     };
@@ -1013,16 +1057,6 @@ export default function RoomPage() {
       if (iceState === 'failed') {
         try {
           pc.restartIce();
-          pc.createOffer({ iceRestart: true }).then(offer => {
-            pc.setLocalDescription(offer);
-            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({
-                type: 'webrtc-signal',
-                targetUserId: targetUserId,
-                signal: { type: 'offer', offer: offer }
-              }));
-            }
-          }).catch(err => console.error('Error restarting ICE:', err));
         } catch (e) {}
       }
     };
@@ -1092,16 +1126,24 @@ export default function RoomPage() {
     };
 
     if (isInitiator) {
-      pc.createOffer().then(offer => {
-        pc.setLocalDescription(offer);
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-          socketRef.current.send(JSON.stringify({
-            type: 'webrtc-signal',
-            targetUserId: targetUserId,
-            signal: { type: 'offer', offer: offer }
-          }));
+      (async () => {
+        try {
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true
+          });
+          await pc.setLocalDescription(offer);
+          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify({
+              type: 'webrtc-signal',
+              targetUserId: targetUserId,
+              signal: { type: 'offer', offer: pc.localDescription }
+            }));
+          }
+        } catch (err) {
+          console.error('[WebRTC] Error creating SDP offer:', err);
         }
-      }).catch(err => console.error('Error creating SDP offer:', err));
+      })();
     }
 
     peerConnectionsRef.current[targetUserId] = pc;
@@ -1117,7 +1159,7 @@ export default function RoomPage() {
         // Only process answer if local user is in the call
         if (!isInCallRef.current || !localStreamRef.current) return;
 
-        if (!pc || pc.signalingState === 'closed') {
+        if (!pc || pc.signalingState === 'closed' || pc.connectionState === 'failed') {
           pc = createPeerConnection(senderUserId, false);
         }
 
@@ -1143,7 +1185,7 @@ export default function RoomPage() {
           socketRef.current.send(JSON.stringify({
             type: 'webrtc-signal',
             targetUserId: senderUserId,
-            signal: { type: 'answer', answer: answer }
+            signal: { type: 'answer', answer: pc.localDescription }
           }));
         }
       } else if (signal.type === 'answer') {
@@ -1162,7 +1204,7 @@ export default function RoomPage() {
         }
       }
     } catch (err) {
-      console.error(`Error handling WebRTC signal from ${senderUserId}:`, err);
+      console.error(`[WebRTC] Error handling signal from ${senderUserId}:`, err);
     }
   };
 
