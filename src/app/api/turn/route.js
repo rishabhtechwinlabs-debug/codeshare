@@ -7,7 +7,9 @@ export async function GET() {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:stun.cloudflare.com:3478' }
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.sipgate.net:3478' },
+    { urls: 'stun:stun.nextcloud.com:443' }
   ];
 
   return NextResponse.json({ iceServers });

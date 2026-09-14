@@ -131,13 +131,17 @@ export default function RoomPage() {
 
   const audioElementsRef = useRef({});
   const activeCallUsersRef = useRef([]);
+  const makingOfferRef = useRef({});
+  const watchdogTimersRef = useRef({});
   const iceServersRef = useRef([
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:stun.cloudflare.com:3478' }
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.sipgate.net:3478' },
+    { urls: 'stun:stun.nextcloud.com:443' }
   ]);
 
   // Fetch dynamic WebRTC ICE configuration
@@ -356,6 +360,11 @@ export default function RoomPage() {
                     audioElementsRef.current[peerId].srcObject = null;
                     delete audioElementsRef.current[peerId];
                   }
+                  if (watchdogTimersRef.current[peerId]) {
+                    clearTimeout(watchdogTimersRef.current[peerId]);
+                    delete watchdogTimersRef.current[peerId];
+                  }
+                  delete makingOfferRef.current[peerId];
                   delete pendingIceCandidatesRef.current[peerId];
                   setRemoteStreams(prev => {
                     const next = { ...prev };
@@ -375,11 +384,11 @@ export default function RoomPage() {
                 newActiveUsers.forEach(peerId => {
                   if (peerId !== myUserIdRef.current) {
                     const existingPc = peerConnectionsRef.current[peerId];
-                    const isConnected = existingPc &&
-                      (existingPc.connectionState === 'connected' || existingPc.iceConnectionState === 'connected' || existingPc.signalingState === 'have-local-offer');
+                    const isHealthy = existingPc &&
+                      (existingPc.connectionState === 'connected' || existingPc.iceConnectionState === 'connected');
 
                     // Lower userId initiates to higher userId to guarantee 1-to-1 connection pairs
-                    if (!isConnected && myUserIdRef.current < peerId) {
+                    if (!isHealthy && myUserIdRef.current < peerId) {
                       createPeerConnection(peerId, true);
                     }
                   }
@@ -865,31 +874,38 @@ export default function RoomPage() {
     });
   };
 
-  const addIceCandidateSafely = async (pc, targetUserId, candidate) => {
-    if (!candidate || !candidate.candidate) return;
-    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
-      try {
-        await pc.addIceCandidate(candidate);
-      } catch (e) {
-        console.error('Error adding ICE candidate:', e);
+  const addIceCandidateSafely = async (pc, targetUserId, candidateData) => {
+    if (!candidateData) return;
+    try {
+      const iceCandidate = (typeof RTCIceCandidate !== 'undefined' && candidateData.candidate)
+        ? new RTCIceCandidate(candidateData)
+        : candidateData;
+
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        await pc.addIceCandidate(iceCandidate);
+      } else {
+        if (!pendingIceCandidatesRef.current[targetUserId]) {
+          pendingIceCandidatesRef.current[targetUserId] = [];
+        }
+        pendingIceCandidatesRef.current[targetUserId].push(candidateData);
       }
-    } else {
-      if (!pendingIceCandidatesRef.current[targetUserId]) {
-        pendingIceCandidatesRef.current[targetUserId] = [];
-      }
-      pendingIceCandidatesRef.current[targetUserId].push(candidate);
+    } catch (e) {
+      console.warn(`[WebRTC] addIceCandidate error for ${targetUserId}:`, e);
     }
   };
 
   const flushPendingIceCandidates = async (pc, targetUserId) => {
     const candidates = pendingIceCandidatesRef.current[targetUserId] || [];
     pendingIceCandidatesRef.current[targetUserId] = [];
-    for (const candidate of candidates) {
-      if (!candidate || !candidate.candidate) continue;
+    for (const cand of candidates) {
+      if (!cand || !cand.candidate) continue;
       try {
-        await pc.addIceCandidate(candidate);
+        const iceCandidate = (typeof RTCIceCandidate !== 'undefined' && cand.candidate)
+          ? new RTCIceCandidate(cand)
+          : cand;
+        await pc.addIceCandidate(iceCandidate);
       } catch (e) {
-        console.error('Error flushing candidate:', e);
+        console.warn(`[WebRTC] flush candidate error for ${targetUserId}:`, e);
       }
     }
   };
@@ -995,10 +1011,43 @@ export default function RoomPage() {
     }
   };
 
+  const sendOffer = async (pc, targetUserId, isIceRestart = false) => {
+    if (!pc || pc.signalingState === 'closed') return;
+    try {
+      makingOfferRef.current[targetUserId] = true;
+      const offerOptions = {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      };
+      if (isIceRestart) {
+        try { pc.restartIce(); } catch (e) {}
+        offerOptions.iceRestart = true;
+      }
+      const offer = await pc.createOffer(offerOptions);
+      if (pc.signalingState === 'closed') return;
+      await pc.setLocalDescription(offer);
+
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'webrtc-signal',
+          targetUserId: targetUserId,
+          signal: { type: 'offer', offer: pc.localDescription }
+        }));
+      }
+    } catch (err) {
+      console.error(`[WebRTC] Error sending offer to ${targetUserId}:`, err);
+    } finally {
+      makingOfferRef.current[targetUserId] = false;
+    }
+  };
+
   const createPeerConnection = (targetUserId, isInitiator) => {
     let pc = peerConnectionsRef.current[targetUserId];
     if (pc && pc.signalingState !== 'closed' && pc.connectionState !== 'failed' && pc.iceConnectionState !== 'failed') {
       ensureLocalTracksOnPeerConnection(pc);
+      if (isInitiator && pc.signalingState === 'stable') {
+        sendOffer(pc, targetUserId, false);
+      }
       return pc;
     }
 
@@ -1014,41 +1063,73 @@ export default function RoomPage() {
       rtcpMuxPolicy: 'require'
     });
 
+    peerConnectionsRef.current[targetUserId] = pc;
     ensureLocalTracksOnPeerConnection(pc);
+
+    const clearWatchdog = () => {
+      if (watchdogTimersRef.current[targetUserId]) {
+        clearTimeout(watchdogTimersRef.current[targetUserId]);
+        delete watchdogTimersRef.current[targetUserId];
+      }
+    };
+
+    const startWatchdog = () => {
+      if (watchdogTimersRef.current[targetUserId]) return;
+      watchdogTimersRef.current[targetUserId] = setTimeout(async () => {
+        delete watchdogTimersRef.current[targetUserId];
+        const currentPc = peerConnectionsRef.current[targetUserId];
+        if (!currentPc || currentPc.signalingState === 'closed') return;
+
+        const cState = currentPc.connectionState;
+        const iState = currentPc.iceConnectionState;
+        if (cState !== 'connected' && iState !== 'connected' && iState !== 'completed') {
+          console.warn(`[WebRTC Watchdog] Peer ${targetUserId} connection stalled (${cState}/${iState}). Attempting recovery...`);
+          if (myUserIdRef.current < targetUserId) {
+            sendOffer(currentPc, targetUserId, true);
+          } else {
+            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({
+                type: 'webrtc-signal',
+                targetUserId: targetUserId,
+                signal: { type: 'request-restart' }
+              }));
+            }
+          }
+        }
+      }, 7000);
+    };
 
     // Track WebRTC connection lifecycle states: mark connected if either DTLS or ICE succeeds
     const updateConnState = () => {
       const connState = pc.connectionState;
       const iceState = pc.iceConnectionState;
       if (connState === 'connected' || iceState === 'connected' || iceState === 'completed') {
+        clearWatchdog();
         setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'connected' }));
       } else if (connState === 'failed' || iceState === 'failed') {
+        clearWatchdog();
         setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'failed' }));
       } else if (connState === 'connecting' || iceState === 'checking') {
+        startWatchdog();
         setPeerConnectionStates(prev => ({ ...prev, [targetUserId]: 'connecting' }));
       }
     };
 
     pc.onconnectionstatechange = () => {
       updateConnState();
-
       if (pc.connectionState === 'failed') {
-        console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed. Performing ICE restart...`);
-        // Only initiator triggers ICE restart to avoid negotiation glare
+        console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed. Performing recovery...`);
         if (myUserIdRef.current < targetUserId) {
-          try {
-            pc.restartIce();
-            pc.createOffer({ iceRestart: true }).then(async (offer) => {
-              await pc.setLocalDescription(offer);
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                socketRef.current.send(JSON.stringify({
-                  type: 'webrtc-signal',
-                  targetUserId: targetUserId,
-                  signal: { type: 'offer', offer: pc.localDescription }
-                }));
-              }
-            }).catch(e => console.warn('[WebRTC] ICE restart offer error:', e));
-          } catch (e) {}
+          sendOffer(pc, targetUserId, true);
+        }
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      updateConnState();
+      if (pc.iceConnectionState === 'failed') {
+        if (myUserIdRef.current < targetUserId) {
+          sendOffer(pc, targetUserId, true);
         }
       }
     };
@@ -1068,27 +1149,6 @@ export default function RoomPage() {
             candidate: candJson
           }
         }));
-      }
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      updateConnState();
-      if (pc.iceConnectionState === 'failed') {
-        if (myUserIdRef.current < targetUserId) {
-          try {
-            pc.restartIce();
-            pc.createOffer({ iceRestart: true }).then(async (offer) => {
-              await pc.setLocalDescription(offer);
-              if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                socketRef.current.send(JSON.stringify({
-                  type: 'webrtc-signal',
-                  targetUserId: targetUserId,
-                  signal: { type: 'offer', offer: pc.localDescription }
-                }));
-              }
-            }).catch(e => console.warn('[WebRTC] ICE restart offer error:', e));
-          } catch (e) {}
-        }
       }
     };
 
@@ -1120,8 +1180,7 @@ export default function RoomPage() {
         // Deduplicate audio track: only attach if not already present on audio element
         const existingTrack = audioEl.srcObject?.getAudioTracks()?.[0];
         if (!existingTrack || existingTrack.id !== audioTrack.id) {
-          const audioStream = new MediaStream([audioTrack]);
-          audioEl.srcObject = audioStream;
+          audioEl.srcObject = new MediaStream([audioTrack]);
           audioEl.play().catch(e => {
             if (e.name !== 'AbortError') {
               console.warn('Audio autoplay blocked by browser policy:', e);
@@ -1162,37 +1221,22 @@ export default function RoomPage() {
     };
 
     if (isInitiator) {
-      (async () => {
-        try {
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true
-          });
-          await pc.setLocalDescription(offer);
-          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({
-              type: 'webrtc-signal',
-              targetUserId: targetUserId,
-              signal: { type: 'offer', offer: pc.localDescription }
-            }));
-          }
-        } catch (err) {
-          console.error('[WebRTC] Error creating SDP offer:', err);
-        }
-      })();
+      sendOffer(pc, targetUserId, false);
     }
 
-    peerConnectionsRef.current[targetUserId] = pc;
     return pc;
   };
 
   const handleIncomingSignal = async (senderUserId, signal) => {
     let pc = peerConnectionsRef.current[senderUserId];
-    const isPolite = myUserIdRef.current < senderUserId;
+    // In standard W3C Perfect Negotiation:
+    // Initiator (myUserId < senderUserId) is IMPOLITE.
+    // Responder (myUserId > senderUserId) is POLITE.
+    const isPolite = myUserIdRef.current > senderUserId;
 
     try {
       if (signal.type === 'offer') {
-        // Only process answer if local user is in the call
+        // Only process offer if local user is in the call
         if (!isInCallRef.current || !localStreamRef.current) return;
 
         if (!pc || pc.signalingState === 'closed' || pc.connectionState === 'failed') {
@@ -1201,7 +1245,7 @@ export default function RoomPage() {
 
         ensureLocalTracksOnPeerConnection(pc);
 
-        const isCollision = pc.signalingState !== 'stable';
+        const isCollision = makingOfferRef.current[senderUserId] || (pc && pc.signalingState !== 'stable');
         if (isCollision) {
           if (!isPolite) {
             // Impolite peer ignores incoming offer during glare
@@ -1237,6 +1281,11 @@ export default function RoomPage() {
             pendingIceCandidatesRef.current[senderUserId] = [];
           }
           pendingIceCandidatesRef.current[senderUserId].push(signal.candidate);
+        }
+      } else if (signal.type === 'request-restart') {
+        if (pc && pc.signalingState !== 'closed') {
+          console.log(`[WebRTC] Received ICE restart request from ${senderUserId}. Initiating restart...`);
+          sendOffer(pc, senderUserId, true);
         }
       }
     } catch (err) {
