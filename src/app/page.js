@@ -2,6 +2,20 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { 
+  User, 
+  Link2, 
+  Plus, 
+  ArrowRight, 
+  RotateCw, 
+  Building2, 
+  Lock, 
+  Users, 
+  Zap, 
+  MessageSquare, 
+  Heart,
+  LogIn
+} from 'lucide-react';
 
 export default function LandingPage() {
   const router = useRouter();
@@ -137,7 +151,7 @@ export default function LandingPage() {
             <div className="form-group">
               <label htmlFor="nickname">Your Nickname</label>
               <div className="input-wrapper">
-                <span className="input-icon">👤</span>
+                <span className="input-icon"><User size={16} /></span>
                 <input
                   type="text"
                   id="nickname"
@@ -168,9 +182,9 @@ export default function LandingPage() {
               <span>Create a New Room</span>
             </div>
 
-            <button id="create-room-btn" className="btn btn-primary" onClick={handleCreateRoom}>
+            <button id="create-room-btn" className="btn btn-primary" onClick={handleCreateRoom} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <span>Create Studio Room</span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              <Plus size={18} />
             </button>
 
             <div className="action-divider">
@@ -179,7 +193,7 @@ export default function LandingPage() {
 
             <div className="join-area">
               <div className="input-wrapper">
-                <span className="input-icon">🔗</span>
+                <span className="input-icon"><Link2 size={16} /></span>
                 <input
                   type="text"
                   id="room-id"
@@ -198,7 +212,10 @@ export default function LandingPage() {
                   }}
                 />
               </div>
-              <button id="join-room-btn" className="btn btn-secondary" onClick={handleJoinRoom}>Join</button>
+              <button id="join-room-btn" className="btn btn-secondary" onClick={handleJoinRoom} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <span>Join</span>
+                <LogIn size={16} />
+              </button>
             </div>
             {roomError && <span className="error-message">{roomError}</span>}
           </div>
@@ -210,7 +227,10 @@ export default function LandingPage() {
                 <h2>Active Studios</h2>
                 <p>Join an ongoing live collaboration room instantly.</p>
               </div>
-              <button className="refresh-btn" onClick={fetchActiveRooms} title="Refresh Room List">🔄 Refresh</button>
+              <button className="refresh-btn" onClick={fetchActiveRooms} title="Refresh Room List" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <RotateCw size={14} />
+                <span>Refresh</span>
+              </button>
             </div>
 
             {loadingRooms ? (
@@ -220,7 +240,9 @@ export default function LandingPage() {
               </div>
             ) : activeRooms.length === 0 ? (
               <div className="dashboard-empty">
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🏢</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.75rem', opacity: 0.8 }}>
+                  <Building2 size={44} />
+                </div>
                 <h3>No active studios right now</h3>
                 <p>Create a studio room on the left to start collaborating!</p>
               </div>
@@ -238,11 +260,19 @@ export default function LandingPage() {
                   >
                     <div className="studio-info-meta">
                       <span className="studio-id-tag">#{room.id}</span>
-                      {room.isLocked && <span className="lock-icon-tag" title="Password Protected">🔒 Locked</span>}
+                      {room.isLocked && (
+                        <span className="lock-icon-tag" title="Password Protected" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <Lock size={12} /> Locked
+                        </span>
+                      )}
                     </div>
                     <div className="studio-join-indicator">
-                      <span className="user-count-tag">👥 {room.userCount} active</span>
-                      <span className="join-action-text">Join Studio →</span>
+                      <span className="user-count-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <Users size={13} /> {room.userCount} active
+                      </span>
+                      <span className="join-action-text" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        Join Studio <ArrowRight size={14} />
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -253,17 +283,17 @@ export default function LandingPage() {
 
         <section className="features">
           <div className="feature-card">
-            <div className="feature-icon">⚡</div>
+            <div className="feature-icon"><Zap size={24} color="#38bdf8" /></div>
             <h3>Real-time Sync</h3>
             <p>Lightning-fast document sharing powered by raw WebSockets.</p>
           </div>
           <div className="feature-card">
-            <div className="feature-icon">👥</div>
+            <div className="feature-icon"><Users size={24} color="#a855f7" /></div>
             <h3>Presence Tracking</h3>
             <p>Watch others type with real-time cursor tracking and name tags.</p>
           </div>
           <div className="feature-card">
-            <div className="feature-icon">💬</div>
+            <div className="feature-icon"><MessageSquare size={24} color="#10b981" /></div>
             <h3>Live Chat</h3>
             <p>Discuss the code and ideas instantly with built-in group chat.</p>
           </div>
@@ -271,7 +301,9 @@ export default function LandingPage() {
       </main>
 
       <footer className="footer">
-        <p>HiveCode © 2026. Made with ❤️ for developers.</p>
+        <p style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          HiveCode © 2026. Made with <Heart size={14} color="#ef4444" fill="#ef4444" /> for developers.
+        </p>
       </footer>
     </div>
   );

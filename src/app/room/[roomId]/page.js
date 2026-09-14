@@ -2,6 +2,53 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import {
+  Copy,
+  Check,
+  Folder,
+  Play,
+  Loader2,
+  PhoneCall,
+  PhoneOff,
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  Settings,
+  Wrench,
+  ChevronDown,
+  History,
+  Camera,
+  Lock,
+  Unlock,
+  ClipboardList,
+  Share2,
+  MessageSquare,
+  Crown,
+  Columns2,
+  Rows2,
+  Minus,
+  Maximize2,
+  Plus,
+  Trash2,
+  X,
+  FileCode,
+  Terminal,
+  Clock,
+  Reply,
+  Smile,
+  Send,
+  Search,
+  Code,
+  RotateCcw,
+  Volume2,
+  Zap,
+  Radio,
+  ExternalLink,
+  Wifi,
+  Circle,
+  AlertCircle
+} from 'lucide-react';
 
 const EMOJIS = ['😀', '😂', '😍', '👍', '🎉', '🔥', '❤️', '👏', '🚀', '💡', '😢', '😮', '🤔', '🙌', '👀', '💯', '✨', '⚡', '💻', '🎨'];
 
@@ -357,7 +404,7 @@ export default function RoomPage() {
               setIsAuthRequired(false);
               setAuthError('');
               setIsRoomLocked(!!data.isLocked);
-              addActivityLog(`✨ Joined room "${roomId}" as "${nicknameRef.current}"`);
+              addActivityLog(`Joined room "${roomId}" as "${nicknameRef.current}"`);
               break;
             }
 
@@ -420,9 +467,9 @@ export default function RoomPage() {
               }
 
               if (data.joinedUserName) {
-                showToast(`🎙️ ${data.joinedUserName} joined the voice call!`, 'join');
+                showToast(`${data.joinedUserName} joined the voice call!`, 'join');
               } else if (data.leftUserName) {
-                showToast(`📞 ${data.leftUserName} left the call.`, 'leave');
+                showToast(`${data.leftUserName} left the call.`, 'leave');
               }
               break;
             }
@@ -439,14 +486,14 @@ export default function RoomPage() {
                 }
               }
 
-              showToast(data.isPresenterMode ? `🔒 Presenter Mode activated by ${data.hostName}` : `🔓 Presenter Mode disabled by ${data.hostName}`, 'join');
-              addActivityLog(data.isPresenterMode ? `🔒 Presenter Mode enabled` : `🔓 Presenter Mode disabled`);
+              showToast(data.isPresenterMode ? `Presenter Mode activated by ${data.hostName}` : `Presenter Mode disabled by ${data.hostName}`, 'join');
+              addActivityLog(data.isPresenterMode ? 'Presenter Mode enabled' : 'Presenter Mode disabled');
               break;
             }
 
             case 'snapshot-created': {
               setSnapshots(data.snapshots);
-              addActivityLog(`📸 Version snapshot saved by ${data.snapshot.author}`);
+              addActivityLog(`Version snapshot saved by ${data.snapshot.author}`);
               break;
             }
 
@@ -496,7 +543,7 @@ export default function RoomPage() {
                 editor.setOption('mode', getCodeMirrorMode(data.language));
                 isRemoteChangeRef.current = false;
               }
-              addActivityLog(`📄 New file created: "${data.filename}"`);
+              addActivityLog(`New file created: "${data.filename}"`);
               break;
             }
 
@@ -517,7 +564,7 @@ export default function RoomPage() {
                   isRemoteChangeRef.current = false;
                 }
               }
-              addActivityLog(`🗑️ File deleted: "${data.filename}"`);
+              addActivityLog(`File deleted: "${data.filename}"`);
               break;
             }
 
@@ -534,7 +581,7 @@ export default function RoomPage() {
               if (activeFileRef.current === data.oldFilename) {
                 setActiveFile(data.newFilename);
               }
-              addActivityLog(`✏️ File renamed: "${data.oldFilename}" → "${data.newFilename}"`);
+              addActivityLog(`File renamed: "${data.oldFilename}" → "${data.newFilename}"`);
               break;
             }
 
@@ -549,7 +596,7 @@ export default function RoomPage() {
               if (data.filename === activeFileRef.current && editor) {
                 editor.setOption('mode', getCodeMirrorMode(data.language));
               }
-              addActivityLog(`🔤 Language changed for "${data.filename}": ${data.language}`);
+              addActivityLog(`Language changed for "${data.filename}": ${data.language}`);
               break;
             }
 
@@ -562,16 +609,16 @@ export default function RoomPage() {
             }
 
             case 'user-joined': {
-              showToast(`👥 ${data.user.name} joined the studio!`, 'join');
+              showToast(`${data.user.name} joined the studio!`, 'join');
               setUsers(data.users);
-              addActivityLog(`👤 User "${data.user.name}" joined the studio`);
+              addActivityLog(`User "${data.user.name}" joined the studio`);
               break;
             }
 
             case 'user-left': {
-              showToast(`🚪 ${data.userName} left the studio.`, 'leave');
+              showToast(`${data.userName} left the studio.`, 'leave');
               setUsers(data.users);
-              addActivityLog(`🚪 User "${data.userName}" left the studio`);
+              addActivityLog(`User "${data.userName}" left the studio`);
 
               if (remoteCursorsRef.current.has(data.userId)) {
                 remoteCursorsRef.current.get(data.userId).clear();
@@ -593,10 +640,10 @@ export default function RoomPage() {
             case 'host-reassigned': {
               if (data.newHostUserId === myUserIdRef.current) {
                 setIsHost(true);
-                showToast('👑 You are now the Room Host!', 'join');
+                showToast('You are now the Room Host!', 'join');
               }
               setHostName(data.newHostName);
-              addActivityLog(`👑 Host reassigned to "${data.newHostName}"`);
+              addActivityLog(`Host reassigned to "${data.newHostName}"`);
               break;
             }
 
@@ -642,8 +689,8 @@ export default function RoomPage() {
                 sessionStorage.removeItem('room_pw_' + roomId);
                 setAuthPassword('');
               }
-              showToast(data.isLocked ? '🔒 Room is now password protected!' : '🔓 Room is now unlocked!', 'join');
-              addActivityLog(data.isLocked ? '🔒 Password protection enabled for this room' : '🔓 Password protection disabled');
+              showToast(data.isLocked ? 'Room is now password protected!' : 'Room is now unlocked!', 'join');
+              addActivityLog(data.isLocked ? 'Password protection enabled for this room' : 'Password protection disabled');
               break;
             }
           }
@@ -654,7 +701,7 @@ export default function RoomPage() {
 
       socket.onclose = () => {
         if (!isComponentMounted) return;
-        showToast('⚠️ Connection lost. Retrying...', 'leave');
+        showToast('Connection lost. Retrying...', 'leave');
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
     };
@@ -863,7 +910,7 @@ export default function RoomPage() {
         code: currentCode,
         note: note || 'Version Checkpoint'
       }));
-      showToast('📸 Version snapshot saved!', 'join');
+      showToast('Version snapshot saved!', 'join');
     }
   };
 
@@ -878,7 +925,7 @@ export default function RoomPage() {
         code: snapshot.code
       }));
       setShowHistoryModal(false);
-      showToast(`↺ Restored version snapshot (${snapshot.timestamp})`, 'join');
+      showToast(`Restored version snapshot (${snapshot.timestamp})`, 'join');
     }
   };
 
@@ -988,7 +1035,7 @@ export default function RoomPage() {
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({ type: 'leave-call' }));
       }
-      showToast('📞 Left the voice call.', 'leave');
+      showToast('Left the voice call.', 'leave');
       return;
     }
 
@@ -1036,7 +1083,7 @@ export default function RoomPage() {
       setIsInCall(true);
       isInCallRef.current = true;
       setIsMuted(false);
-      showToast('🎙️ Joined voice call!', 'join');
+      showToast('Joined voice call!', 'join');
 
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({ type: 'join-call' }));
@@ -1608,13 +1655,13 @@ export default function RoomPage() {
     const currentLang = files[activeFile]?.language || 'javascript';
 
     if (!currentCode || !currentCode.trim()) {
-      showToast('⚠️ Editor is empty!', 'leave');
+      showToast('Editor is empty!', 'leave');
       return;
     }
 
     setIsRunningCode(true);
     setShowTerminal(true);
-    setTerminalResult({ output: '🚀 Compiling and executing code in sandbox...', executionTime: 0 });
+    setTerminalResult({ output: 'Compiling and executing code in sandbox...', executionTime: 0 });
 
     try {
       const res = await fetch('/api/execute', {
@@ -1849,7 +1896,7 @@ export default function RoomPage() {
     if (!roomId) return;
     navigator.clipboard.writeText(roomId).then(() => {
       setCopiedRoomId(true);
-      showToast('📋 Room ID copied to clipboard!', 'join');
+      showToast('Room ID copied to clipboard!', 'join');
       setTimeout(() => setCopiedRoomId(false), 2000);
     }).catch(err => {
       console.error('Failed to copy Room ID: ', err);
@@ -1869,7 +1916,7 @@ export default function RoomPage() {
   const handleShare = () => {
     const shareUrl = window.location.href;
     navigator.clipboard.writeText(shareUrl).then(() => {
-      showToast('📋 Link copied to clipboard!', 'join');
+      showToast('Link copied to clipboard!', 'join');
     }).catch(err => {
       console.error('Failed to copy: ', err);
     });
@@ -1965,7 +2012,9 @@ export default function RoomPage() {
             title="Click to view in Large Spotlight View"
           >
             {speakingUsers[myUserIdRef.current] && (
-              <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+              <span className="webrtc-speaker-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <Mic size={12} /> Speaking...
+              </span>
             )}
             <button 
               type="button"
@@ -1975,8 +2024,9 @@ export default function RoomPage() {
                 setSpotlightUser('local');
               }}
               title="Large View (Google Meet Spotlight)"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              ⛶ Large View
+              <Maximize2 size={11} /> Large View
             </button>
             <video
               autoPlay
@@ -2014,7 +2064,9 @@ export default function RoomPage() {
                 title="Click to view in Large Spotlight View"
               >
                 {isPeerSpeaking && (
-                  <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+                  <span className="webrtc-speaker-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Mic size={12} /> Speaking...
+                  </span>
                 )}
                 <button 
                   type="button"
@@ -2024,14 +2076,18 @@ export default function RoomPage() {
                     setSpotlightUser(peerId);
                   }}
                   title="Large View (Google Meet Spotlight)"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                 >
-                  ⛶ Large View
+                  <Maximize2 size={11} /> Large View
                 </button>
-                <span className={`webrtc-connection-badge badge-${connState}`}>
-                  {connState === 'connected' ? '🟢 Connected' : connState === 'connecting' ? '🟡 Connecting' : `🔴 ${connState}`}
+                <span className={`webrtc-connection-badge badge-${connState}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <Circle size={8} fill={connState === 'connected' ? '#10b981' : connState === 'connecting' ? '#f59e0b' : '#ef4444'} color="transparent" />
+                  {connState === 'connected' ? 'Connected' : connState === 'connecting' ? 'Connecting' : connState}
                 </span>
                 {stats && (
-                  <span className="webrtc-ping-badge">📶 {stats.rtt}ms</span>
+                  <span className="webrtc-ping-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Wifi size={10} /> {stats.rtt}ms
+                  </span>
                 )}
                 {hasVideoTrack ? (
                   <video 
@@ -2053,8 +2109,13 @@ export default function RoomPage() {
                     >
                       {peerUser ? peerUser.name.substring(0, 2).toUpperCase() : 'PE'}
                     </div>
-                    <span className="audio-status-label">
-                      {connState === 'connected' ? (isPeerSpeaking ? 'Speaking...' : 'Audio Active') : connState === 'connecting' ? 'Connecting...' : 'Connection Failed'}
+                    <span className="audio-status-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      {connState === 'connected' ? (
+                        <>
+                          <Volume2 size={12} />
+                          {isPeerSpeaking ? 'Speaking...' : 'Audio Active'}
+                        </>
+                      ) : connState === 'connecting' ? 'Connecting...' : 'Connection Failed'}
                     </span>
                   </div>
                 )}
@@ -2070,7 +2131,9 @@ export default function RoomPage() {
   const renderStageHeader = (isSideLayout = false) => (
     <div className="shelf-header">
       <div className="shelf-title">
-        <span className="live-dot">🟢</span>
+        <span className="live-dot" style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <Circle size={8} fill="#10b981" color="transparent" />
+        </span>
         <span>{isSideLayout ? 'MEET STAGE' : 'STUDIO STAGE'} ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)})</span>
       </div>
       <div className="shelf-actions">
@@ -2081,16 +2144,20 @@ export default function RoomPage() {
             className={`dock-btn ${stageDockPosition === 'side' ? 'active' : ''}`}
             onClick={() => setStageDockPosition('side')}
             title="Side Layout (Google Meet style)"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
           >
-            ◫ Side
+            <Columns2 size={13} />
+            <span>Side</span>
           </button>
           <button 
             type="button"
             className={`dock-btn ${stageDockPosition === 'top' ? 'active' : ''}`}
             onClick={() => setStageDockPosition('top')}
             title="Top Banner Layout"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
           >
-            ⬒ Top
+            <Rows2 size={13} />
+            <span>Top</span>
           </button>
         </div>
 
@@ -2099,8 +2166,9 @@ export default function RoomPage() {
           className="shelf-ctrl-btn" 
           onClick={() => setIsVideoShelfMinimized(true)}
           title="Minimize to Floating Pill"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          —
+          <Minus size={14} />
         </button>
       </div>
     </div>
@@ -2125,7 +2193,9 @@ export default function RoomPage() {
           <div className="room-badge-pill" onClick={handleCopyRoomId} title="Click to copy Room ID">
             <span className="room-badge-label">ROOM</span>
             <span className="room-badge-id">{roomId || '--------'}</span>
-            <span className="room-badge-copy-icon">{copiedRoomId ? '✓' : '📋'}</span>
+            <span className="room-badge-copy-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
+              {copiedRoomId ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+            </span>
           </div>
 
           <button 
@@ -2133,7 +2203,7 @@ export default function RoomPage() {
             onClick={() => setShowFileExplorer(!showFileExplorer)} 
             title={showFileExplorer ? "Hide Files Explorer" : "Show Files Explorer"}
           >
-            <span>📁</span>
+            <Folder size={15} />
             <span className="btn-label">Files</span>
           </button>
         </div>
@@ -2147,7 +2217,9 @@ export default function RoomPage() {
             disabled={isRunningCode} 
             title="Execute Code in Sandbox Console (Ctrl+Enter)"
           >
-            <span className="run-icon">{isRunningCode ? '⏳' : '▶'}</span>
+            <span className="run-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
+              {isRunningCode ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} fill="currentColor" />}
+            </span>
             <span className="run-text">{isRunningCode ? 'Running...' : 'Run Code'}</span>
           </button>
 
@@ -2159,7 +2231,9 @@ export default function RoomPage() {
                 onClick={handleToggleCall}
                 title={callActiveUsers.length > 0 ? `Join Call (${callActiveUsers.length} Active)` : "Start Voice/Video Call"}
               >
-                <span>{callActiveUsers.length > 0 ? '📞' : '🎙️'}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  {callActiveUsers.length > 0 ? <PhoneCall size={15} /> : <Mic size={15} />}
+                </span>
                 <span className="pill-text">
                   {callActiveUsers.length > 0 ? `Join Call (${callActiveUsers.length})` : 'Start Call'}
                 </span>
@@ -2170,29 +2244,34 @@ export default function RoomPage() {
                   className={`call-ctrl-btn ${isMuted ? 'btn-danger' : 'btn-active'}`}
                   onClick={handleToggleMute} 
                   title={isMuted ? "Unmute Mic" : "Mute Mic"}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <span>{isMuted ? '🔇' : '🎙️'}</span>
+                  {isMuted ? <MicOff size={15} /> : <Mic size={15} />}
                 </button>
                 <button 
                   className={`call-ctrl-btn ${isVideoOn ? 'btn-active' : ''}`}
                   onClick={handleToggleVideo} 
                   title={isVideoOn ? "Turn Camera Off" : "Turn Camera On"}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <span>{isVideoOn ? '📹' : '📷'}</span>
+                  {isVideoOn ? <Video size={15} /> : <VideoOff size={15} />}
                 </button>
                 <button 
                   className="call-ctrl-btn desktop-only"
                   onClick={handleOpenDeviceModal} 
                   title="Audio & Video Settings"
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <span>⚙️</span>
+                  <Settings size={15} />
                 </button>
                 <button 
                   className="call-ctrl-btn btn-leave-call"
                   onClick={handleToggleCall} 
                   title="Cancel and Leave Call"
                 >
-                  <span className="leave-icon">❌</span>
+                  <span className="leave-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <PhoneOff size={14} />
+                  </span>
                   <span className="leave-text">End</span>
                 </button>
               </div>
@@ -2237,9 +2316,9 @@ export default function RoomPage() {
               onClick={() => setShowToolsMenu(!showToolsMenu)}
               title="Studio Tools & Settings"
             >
-              <span>🛠️</span>
+              <Wrench size={15} />
               <span className="btn-label desktop-only">Tools</span>
-              <span style={{ fontSize: '0.65rem' }}>▾</span>
+              <ChevronDown size={12} />
             </button>
 
             {showToolsMenu && (
@@ -2252,7 +2331,7 @@ export default function RoomPage() {
                     if (snapshots.length && !selectedSnapshot) setSelectedSnapshot(snapshots[0]);
                   }}
                 >
-                  <span style={{ fontSize: '1.1rem' }}>⏱️</span>
+                  <History size={18} color="#38bdf8" />
                   <div>
                     <div className="item-title">Version History</div>
                     <div className="item-desc">View code diffs & checkpoints</div>
@@ -2266,7 +2345,7 @@ export default function RoomPage() {
                     handleSaveSnapshot();
                   }}
                 >
-                  <span style={{ fontSize: '1.1rem' }}>📸</span>
+                  <Camera size={18} color="#a855f7" />
                   <div>
                     <div className="item-title">Save Snapshot</div>
                     <div className="item-desc">Create immediate restore point</div>
@@ -2280,7 +2359,7 @@ export default function RoomPage() {
                     setShowLockModal(true);
                   }}
                 >
-                  <span style={{ fontSize: '1.1rem' }}>{isRoomLocked ? '🔒' : '🔓'}</span>
+                  {isRoomLocked ? <Lock size={18} color="#ef4444" /> : <Unlock size={18} color="#10b981" />}
                   <div>
                     <div className="item-title">{isRoomLocked ? 'Room Protected' : 'Room Security'}</div>
                     <div className="item-desc">{isRoomLocked ? 'Change password' : 'Lock with password'}</div>
@@ -2294,7 +2373,7 @@ export default function RoomPage() {
                     setShowLogsModal(true);
                   }}
                 >
-                  <span style={{ fontSize: '1.1rem' }}>📋</span>
+                  <ClipboardList size={18} color="#f59e0b" />
                   <div>
                     <div className="item-title">Activity Logs</div>
                     <div className="item-desc">Real-time room events</div>
@@ -2309,7 +2388,7 @@ export default function RoomPage() {
                       handleTogglePresenterMode();
                     }}
                   >
-                    <span style={{ fontSize: '1.1rem' }}>{isPresenterMode ? '🔓' : '🔒'}</span>
+                    {isPresenterMode ? <Unlock size={18} color="#ef4444" /> : <Lock size={18} color="#38bdf8" />}
                     <div>
                       <div className="item-title">{isPresenterMode ? 'End Presenter Mode' : 'Start Presenter Mode'}</div>
                       <div className="item-desc">{isPresenterMode ? 'Allow guests to edit' : 'Lock guest editing'}</div>
@@ -2349,7 +2428,7 @@ export default function RoomPage() {
 
           {/* Share Button */}
           <button className="header-primary-btn" onClick={handleShare} title="Copy Share Link">
-            <span>🔗</span>
+            <Share2 size={15} />
             <span className="btn-label desktop-only">Share</span>
           </button>
 
@@ -2366,7 +2445,7 @@ export default function RoomPage() {
             }} 
             title={isSidebarOpen ? "Hide Chat Sidebar" : "Show Chat Sidebar"}
           >
-            <span>💬</span>
+            <MessageSquare size={15} />
             <span className="btn-label desktop-only">Chat</span>
             {chatMessages.length > 0 && (
               <span className="chat-badge-counter">{chatMessages.length}</span>
@@ -2385,12 +2464,20 @@ export default function RoomPage() {
                   style={{ backgroundColor: u.color }}
                 >
                   {u.name.substring(0, 2).toUpperCase()}
-                  {inCall && <span className="call-badge">{isSpeaking ? '⚡' : '🎙️'}</span>}
-                  <span className="tooltip">
+                  {inCall && (
+                    <span className="call-badge" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {isSpeaking ? <Zap size={10} color="#fbbf24" fill="#fbbf24" /> : <Mic size={10} color="#fff" />}
+                    </span>
+                  )}
+                  <span className="tooltip" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                     {u.name}
                     {u.id === myUserIdRef.current ? ' (You)' : ''}
-                    {u.id === (isHost ? myUserIdRef.current : '') ? ' 👑 Host' : ''}
-                    {isSpeaking ? ' 🎙️ (Speaking...)' : inCall ? ' 🎙️ (In Call)' : ''}
+                    {u.id === (isHost ? myUserIdRef.current : '') && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', color: '#fbbf24' }}>
+                        <Crown size={12} /> Host
+                      </span>
+                    )}
+                    {isSpeaking ? ' (Speaking...)' : inCall ? ' (In Call)' : ''}
                   </span>
                 </div>
               );
@@ -2407,9 +2494,9 @@ export default function RoomPage() {
       {/* Guest Read-Only Presenter Banner */}
       {isPresenterMode && !isHost && (
         <div className="presenter-banner">
-          <div className="presenter-banner-text">
-            <span>🔒 PRESENTER MODE ACTIVE</span>
-            <span>- Code editing is currently restricted to Host ({hostName}). You are in view-only Watch Party mode.</span>
+          <div className="presenter-banner-text" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <Lock size={15} />
+            <span>PRESENTER MODE ACTIVE - Code editing is currently restricted to Host ({hostName}). You are in view-only Watch Party mode.</span>
           </div>
         </div>
       )}
@@ -2423,9 +2510,13 @@ export default function RoomPage() {
               onClick={() => setIsVideoShelfMinimized(false)}
               title="Expand Video Stage"
             >
-              <span className="live-dot">🟢</span>
+              <span className="live-dot" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <Circle size={8} fill="#10b981" color="transparent" />
+              </span>
               <span>Stage ({Object.keys(remoteStreams).length + (isVideoOn ? 1 : 0)})</span>
-              <span className="pill-expand-icon">⤢</span>
+              <span className="pill-expand-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <Maximize2 size={13} />
+              </span>
             </div>
             <button 
               className="pill-leave-btn"
@@ -2434,8 +2525,10 @@ export default function RoomPage() {
                 handleToggleCall();
               }}
               title="Cancel and Leave Call"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              ❌ End
+              <PhoneOff size={13} />
+              <span>End</span>
             </button>
           </div>
         ) : stageDockPosition === 'top' ? (
@@ -2455,7 +2548,14 @@ export default function RoomPage() {
           <div className="file-explorer-sidebar">
             <div className="file-explorer-header">
               <span>FILES</span>
-              <button className="add-file-btn" onClick={handleCreateFile} title="Create New File">+</button>
+              <button 
+                className="add-file-btn" 
+                onClick={handleCreateFile} 
+                title="Create New File"
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Plus size={14} />
+              </button>
             </div>
             <div className="file-list">
               {Object.keys(files).map(filename => (
@@ -2464,9 +2564,19 @@ export default function RoomPage() {
                   className={`file-item ${filename === activeFile ? 'active' : ''}`}
                   onClick={() => handleSwitchFile(filename)}
                 >
-                  <span>📄 {filename}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <FileCode size={14} />
+                    <span>{filename}</span>
+                  </span>
                   <div className="file-item-actions">
-                    <button className="file-action-icon" onClick={(e) => handleDeleteFile(filename, e)} title="Delete File">🗑️</button>
+                    <button 
+                      className="file-action-icon" 
+                      onClick={(e) => handleDeleteFile(filename, e)} 
+                      title="Delete File"
+                      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -2484,7 +2594,10 @@ export default function RoomPage() {
                 className={`file-tab ${tabFile === activeFile ? 'active' : ''}`}
                 onClick={() => handleSwitchFile(tabFile)}
               >
-                <span>📄 {tabFile}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <FileCode size={13} />
+                  <span>{tabFile}</span>
+                </span>
                 {openTabs.length > 1 && (
                   <button 
                     className="file-tab-close" 
@@ -2496,8 +2609,9 @@ export default function RoomPage() {
                         if (remaining.length > 0) handleSwitchFile(remaining[0]);
                       }
                     }}
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                   >
-                    ✕
+                    <X size={12} />
                   </button>
                 )}
               </div>
@@ -2512,12 +2626,20 @@ export default function RoomPage() {
           {showTerminal && (
             <div className="terminal-drawer">
               <div className="terminal-header">
-                <span>🖥️ LIVE CONSOLE OUTPUT ({files[activeFile]?.language?.toUpperCase() || 'SANDBOX'})</span>
-                <button className="close-picker-btn" onClick={() => setShowTerminal(false)}>✕</button>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <Terminal size={15} />
+                  <span>LIVE CONSOLE OUTPUT ({files[activeFile]?.language?.toUpperCase() || 'SANDBOX'})</span>
+                </span>
+                <button className="close-picker-btn" onClick={() => setShowTerminal(false)} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <X size={15} />
+                </button>
               </div>
               <div className="terminal-output">
                 {isRunningCode ? (
-                  <div style={{ color: '#60a5fa' }}>⏳ Executing code in remote sandbox...</div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#60a5fa' }}>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Executing code in remote sandbox...</span>
+                  </div>
                 ) : terminalResult ? (
                   <div>
                     {terminalResult.stdout && <div className="terminal-stdout">{terminalResult.stdout}</div>}
@@ -2526,12 +2648,17 @@ export default function RoomPage() {
                       <div style={{ color: '#94a3b8' }}>{terminalResult.output || 'Code executed with no output returned.'}</div>
                     )}
                     {terminalResult.error && <div className="terminal-stderr">{terminalResult.error}</div>}
-                    <div className="terminal-meta">
-                      ⏱️ Runtime: {terminalResult.executionTime || 0}ms | Exit Code: {terminalResult.code ?? 0}
+                    <div className="terminal-meta" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Clock size={12} />
+                      <span>Runtime: {terminalResult.executionTime || 0}ms | Exit Code: {terminalResult.code ?? 0}</span>
                     </div>
                   </div>
                 ) : (
-                  <div style={{ color: '#94a3b8' }}>Click "▶️ Run Code" in the top bar to execute code.</div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#94a3b8' }}>
+                    <span>Click</span>
+                    <Play size={12} fill="currentColor" />
+                    <span>Run Code in the top bar to execute code.</span>
+                  </div>
                 )}
               </div>
             </div>
@@ -2565,7 +2692,9 @@ export default function RoomPage() {
           }}
         >
           <div className="sidebar-tabs" style={{ display: 'flex', justifyContent: 'center', background: 'rgba(0, 0, 0, 0.2)', padding: '1rem', borderBottom: '1px solid var(--border-color)' }}>
-            <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--primary-color)', letterSpacing: '0.05em' }}>💬 LIVE STUDIO CHAT</span>
+            <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--primary-color)', letterSpacing: '0.05em', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <MessageSquare size={16} /> LIVE STUDIO CHAT
+            </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', position: 'relative' }}>
@@ -2628,8 +2757,8 @@ export default function RoomPage() {
                           <button key={emoji} onClick={() => handleReact(msg.id, emoji)}>{emoji}</button>
                         ))}
                       </div>
-                      <button className="reply-action-btn" onClick={() => setReplyingTo(msg)} title="Reply">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 17H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-5l-5 5v-5z"></path></svg>
+                      <button className="reply-action-btn" onClick={() => setReplyingTo(msg)} title="Reply" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Reply size={13} />
                       </button>
                     </div>
                   )}
@@ -2658,12 +2787,16 @@ export default function RoomPage() {
                     <span className="reply-sender">{replyingTo.sender}</span>
                     <span className="reply-text-snippet">{replyingTo.isGif ? '[GIF]' : replyingTo.text}</span>
                   </div>
-                  <button className="cancel-reply-btn" onClick={() => setReplyingTo(null)}>✕</button>
+                  <button className="cancel-reply-btn" onClick={() => setReplyingTo(null)} title="Cancel reply" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <X size={13} />
+                  </button>
                 </div>
               )}
 
               <div className="chat-input-area">
-                <button className="input-picker-btn emoji-btn" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} title="Add Emoji">😀</button>
+                <button className="input-picker-btn emoji-btn" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }} title="Add Emoji" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Smile size={18} />
+                </button>
                 <button className="input-picker-btn gif-btn" onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); if (!gifs.length) loadDefaultGifs(); }} title="Share GIF">GIF</button>
                 
                 <input
@@ -2678,8 +2811,8 @@ export default function RoomPage() {
                     setTimeout(sendTypingStop, 500);
                   }}
                 />
-                <button className="send-msg-btn" onClick={() => handleSendChat()}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                <button className="send-msg-btn" onClick={() => handleSendChat()} title="Send message" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Send size={15} />
                 </button>
               </div>
             </div>
@@ -2689,7 +2822,9 @@ export default function RoomPage() {
               <div className="emoji-picker-panel glass-card">
                 <div className="picker-header">
                   <span>Emojis</span>
-                  <button className="close-picker-btn" onClick={() => setShowEmojiPicker(false)}>✕</button>
+                  <button className="close-picker-btn" onClick={() => setShowEmojiPicker(false)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <X size={14} />
+                  </button>
                 </div>
                 <div className="emojis-grid">
                   {EMOJIS.map(emoji => (
@@ -2704,14 +2839,18 @@ export default function RoomPage() {
               <div className="gif-picker-panel glass-card">
                 <div className="picker-header">
                   <span>Select a GIF</span>
-                  <button className="close-picker-btn" onClick={() => setShowGifPicker(false)}>✕</button>
+                  <button className="close-picker-btn" onClick={() => setShowGifPicker(false)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <X size={14} />
+                  </button>
                 </div>
-                <div className="gif-search-wrapper">
+                <div className="gif-search-wrapper" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Search size={14} style={{ position: 'absolute', left: '10px', color: 'var(--text-muted)' }} />
                   <input 
                     type="text" 
                     placeholder="Search Giphy..." 
                     value={gifQuery}
                     onChange={(e) => handleGifSearch(e.target.value)}
+                    style={{ paddingLeft: '32px' }}
                   />
                 </div>
                 <div className="gifs-grid-container">
@@ -2741,7 +2880,7 @@ export default function RoomPage() {
           className={`mobile-nav-item ${mobileActiveView === 'editor' ? 'active' : ''}`}
           onClick={() => setMobileActiveView('editor')}
         >
-          <span className="nav-icon">💻</span>
+          <span className="nav-icon"><Code size={20} /></span>
           <span className="nav-label">Code</span>
         </button>
 
@@ -2749,7 +2888,7 @@ export default function RoomPage() {
           className={`mobile-nav-item ${mobileActiveView === 'files' ? 'active' : ''}`}
           onClick={() => setMobileActiveView('files')}
         >
-          <span className="nav-icon">📁</span>
+          <span className="nav-icon"><Folder size={20} /></span>
           <span className="nav-label">Files</span>
           {Object.keys(files).length > 0 && (
             <span className="nav-badge">{Object.keys(files).length}</span>
@@ -2763,7 +2902,7 @@ export default function RoomPage() {
             setMobileActiveView('chat');
           }}
         >
-          <span className="nav-icon">💬</span>
+          <span className="nav-icon"><MessageSquare size={20} /></span>
           <span className="nav-label">Chat</span>
           {chatMessages.length > 0 && (
             <span className="nav-badge">{chatMessages.length}</span>
@@ -2777,7 +2916,7 @@ export default function RoomPage() {
             setMobileActiveView('terminal');
           }}
         >
-          <span className="nav-icon">🖥️</span>
+          <span className="nav-icon"><Terminal size={20} /></span>
           <span className="nav-label">Console</span>
         </button>
       </nav>
@@ -2786,8 +2925,12 @@ export default function RoomPage() {
       <div className={`modal ${showHistoryModal ? 'open' : ''}`}>
         <div className="modal-content glass-card history-modal">
           <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <h3 style={{ margin: 0 }}>⏱️ Version History & Code Diff</h3>
-            <button className="close-picker-btn" onClick={() => setShowHistoryModal(false)}>✕</button>
+            <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <History size={18} /> Version History & Code Diff
+            </h3>
+            <button className="close-picker-btn" onClick={() => setShowHistoryModal(false)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={16} />
+            </button>
           </div>
 
           <div className="history-container">
@@ -2797,7 +2940,7 @@ export default function RoomPage() {
               </div>
               {snapshots.length === 0 ? (
                 <div style={{ padding: '1rem', color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-                  No snapshots saved yet. Click "📸 Snapshot" in top bar to save one.
+                  No snapshots saved yet. Click "Snapshot" in the top bar to save one.
                 </div>
               ) : (
                 snapshots.map(s => (
@@ -2822,8 +2965,8 @@ export default function RoomPage() {
                       <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>{selectedSnapshot.note}</span>
                       <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>({selectedSnapshot.filename})</span>
                     </div>
-                    <button className="btn btn-primary" style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }} onClick={() => handleRestoreSnapshot(selectedSnapshot)}>
-                      ↺ Restore This Version
+                    <button className="btn btn-primary" style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }} onClick={() => handleRestoreSnapshot(selectedSnapshot)}>
+                      <RotateCcw size={13} /> Restore This Version
                     </button>
                   </div>
                   <div className="diff-content">
@@ -2867,7 +3010,9 @@ export default function RoomPage() {
       {/* Password Authentication Modal */}
       <div className={`modal ${isAuthRequired ? 'open' : ''}`}>
         <form className="modal-content glass-card" onSubmit={handleAuthSubmit}>
-          <h3>🔒 Password Required</h3>
+          <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <Lock size={18} /> Password Required
+          </h3>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>This room is locked. Please enter the password to join.</p>
           <input
             type="password"
@@ -2886,14 +3031,20 @@ export default function RoomPage() {
       <div className={`modal ${showLockModal ? 'open' : ''}`}>
         <div className="modal-content glass-card">
           <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0 }}>Room Security</h3>
-            <button className="close-picker-btn" onClick={() => setShowLockModal(false)}>✕</button>
+            <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Lock size={18} /> Room Security
+            </h3>
+            <button className="close-picker-btn" onClick={() => setShowLockModal(false)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={16} />
+            </button>
           </div>
           
           {isRoomLocked ? (
             <div>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>This room is currently password protected.</p>
-              <button className="btn btn-secondary" onClick={handleRemoveLock} style={{ width: '100%', marginTop: '1rem' }}>🔓 Remove Password Protection</button>
+              <button className="btn btn-secondary" onClick={handleRemoveLock} style={{ width: '100%', marginTop: '1rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                <Unlock size={14} /> Remove Password Protection
+              </button>
             </div>
           ) : (
             <form onSubmit={handleSetLockSubmit}>
@@ -2916,8 +3067,12 @@ export default function RoomPage() {
       <div className={`modal ${showLogsModal ? 'open' : ''}`}>
         <div className="modal-content glass-card activity-logs-modal" style={{ maxWidth: '480px' }}>
           <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0 }}>📋 Activity Logs</h3>
-            <button className="close-picker-btn" onClick={() => setShowLogsModal(false)}>✕</button>
+            <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <ClipboardList size={18} /> Activity Logs
+            </h3>
+            <button className="close-picker-btn" onClick={() => setShowLogsModal(false)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={16} />
+            </button>
           </div>
           
           <div className="logs-list-container" style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '1.25rem', paddingRight: '0.25rem' }}>
@@ -2938,7 +3093,9 @@ export default function RoomPage() {
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button className="btn btn-secondary" onClick={() => setActivityLogs([])} style={{ flex: 1 }}>Clear Logs</button>
+            <button className="btn btn-secondary" onClick={() => setActivityLogs([])} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+              <Trash2 size={14} /> Clear Logs
+            </button>
             <button className="btn btn-primary" onClick={() => setShowLogsModal(false)} style={{ flex: 1 }}>Close</button>
           </div>
         </div>
@@ -2948,8 +3105,12 @@ export default function RoomPage() {
       <div className={`modal ${showDeviceModal ? 'open' : ''}`}>
         <div className="modal-content glass-card" style={{ maxWidth: '420px' }}>
           <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0 }}>⚙️ Media Device Settings</h3>
-            <button className="close-picker-btn" onClick={() => setShowDeviceModal(false)}>✕</button>
+            <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Settings size={18} /> Media Device Settings
+            </h3>
+            <button className="close-picker-btn" onClick={() => setShowDeviceModal(false)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={16} />
+            </button>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
@@ -2991,16 +3152,22 @@ export default function RoomPage() {
         <div className="spotlight-overlay" onClick={() => setSpotlightUser(null)}>
           <div className="spotlight-container" onClick={(e) => e.stopPropagation()}>
             <div className="spotlight-header">
-              <div className="spotlight-user-info">
-                <span className="live-dot">🟢</span>
+              <div className="spotlight-user-info" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="live-dot" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <Circle size={8} fill="#10b981" color="transparent" />
+                </span>
                 <span className="spotlight-user-name">
                   {spotlightUser === 'local' ? 'You (Camera)' : (users.find(u => u.id === spotlightUser)?.nickname || 'Participant')}
                 </span>
                 {spotlightUser !== 'local' && connectionStats[spotlightUser] && (
-                  <span className="webrtc-ping-badge">📶 {connectionStats[spotlightUser].rtt || connectionStats[spotlightUser].latencyMs}ms</span>
+                  <span className="webrtc-ping-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Wifi size={10} /> {connectionStats[spotlightUser].rtt || connectionStats[spotlightUser].latencyMs}ms
+                  </span>
                 )}
                 {speakingUsers[spotlightUser === 'local' ? myUserIdRef.current : spotlightUser] && (
-                  <span className="webrtc-speaker-indicator">🎙️ Speaking...</span>
+                  <span className="webrtc-speaker-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Mic size={12} color="#10b981" /> Speaking...
+                  </span>
                 )}
               </div>
               <button 
@@ -3008,8 +3175,9 @@ export default function RoomPage() {
                 className="spotlight-close-btn"
                 onClick={() => setSpotlightUser(null)}
                 title="Exit Large View (Esc)"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
-                ✕ Close Large View
+                <X size={15} /> Close Large View
               </button>
             </div>
 
@@ -3070,8 +3238,9 @@ export default function RoomPage() {
       {/* Toast Notification Container */}
       <div className="toast-container">
         {toasts.map(t => (
-          <div key={t.id} className={`toast ${t.type === 'leave' ? 'system-leave' : ''}`}>
-            {t.message}
+          <div key={t.id} className={`toast ${t.type === 'leave' ? 'system-leave' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {t.type === 'leave' ? <AlertCircle size={15} color="#ef4444" /> : <Check size={15} color="#10b981" />}
+            <span>{t.message}</span>
           </div>
         ))}
       </div>
