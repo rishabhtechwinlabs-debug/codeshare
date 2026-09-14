@@ -687,6 +687,21 @@ export default function RoomPage() {
   };
 
   // WebRTC Audio / Video Call Handlers
+  const ensureLocalTracksOnPeerConnection = (pc) => {
+    if (!localStreamRef.current || !pc || pc.signalingState === 'closed') return;
+    const senders = pc.getSenders();
+    localStreamRef.current.getTracks().forEach(track => {
+      const alreadyAdded = senders.some(s => s.track && s.track.id === track.id);
+      if (!alreadyAdded) {
+        try {
+          pc.addTrack(track, localStreamRef.current);
+        } catch (e) {
+          console.warn('Error adding track to PC:', e);
+        }
+      }
+    });
+  };
+
   const addIceCandidateSafely = async (pc, targetUserId, candidate) => {
     if (pc.remoteDescription && pc.remoteDescription.type) {
       try {
@@ -737,6 +752,15 @@ export default function RoomPage() {
       return;
     }
 
+    // Resume AudioContext on user gesture to unlock browser audio autoplay
+    if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') ctx.resume();
+      } catch (e) {}
+    }
+
     try {
       let stream = null;
       try {
@@ -751,9 +775,14 @@ export default function RoomPage() {
         setIsVideoOn(false);
       }
 
+      // Ensure audio track is enabled
+      const at = stream.getAudioTracks()[0];
+      if (at) at.enabled = true;
+
       localStreamRef.current = stream;
       setIsInCall(true);
       isInCallRef.current = true;
+      setIsMuted(false);
       showToast('🎙️ Joined voice call!', 'join');
 
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -772,11 +801,13 @@ export default function RoomPage() {
   };
 
   const createPeerConnection = (targetUserId, isInitiator) => {
-    if (peerConnectionsRef.current[targetUserId] && peerConnectionsRef.current[targetUserId].signalingState !== 'closed') {
-      return peerConnectionsRef.current[targetUserId];
+    let pc = peerConnectionsRef.current[targetUserId];
+    if (pc && pc.signalingState !== 'closed') {
+      ensureLocalTracksOnPeerConnection(pc);
+      return pc;
     }
 
-    const pc = new RTCPeerConnection({
+    pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
@@ -785,11 +816,7 @@ export default function RoomPage() {
       ]
     });
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current);
-      });
-    }
+    ensureLocalTracksOnPeerConnection(pc);
 
     pc.onicecandidate = (event) => {
       if (event.candidate && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -876,6 +903,8 @@ export default function RoomPage() {
         if (!pc || pc.signalingState === 'closed') {
           pc = createPeerConnection(senderUserId, false);
         }
+
+        ensureLocalTracksOnPeerConnection(pc);
 
         const isCollision = pc.signalingState !== 'stable';
         if (isCollision) {
