@@ -132,6 +132,8 @@ export default function RoomPage() {
   const audioElementsRef = useRef({});
   const activeCallUsersRef = useRef([]);
   const makingOfferRef = useRef({});
+  const isSettingRemoteAnswerPendingRef = useRef({});
+  const signalingQueueRef = useRef({});
   const watchdogTimersRef = useRef({});
   const iceServersRef = useRef([
     { urls: 'stun:stun.l.google.com:19302' },
@@ -352,12 +354,14 @@ export default function RoomPage() {
               Object.keys(peerConnectionsRef.current).forEach(peerId => {
                 if (!newActiveUsers.includes(peerId)) {
                   if (peerConnectionsRef.current[peerId]) {
-                    peerConnectionsRef.current[peerId].close();
+                    try { peerConnectionsRef.current[peerId].close(); } catch (e) {}
                     delete peerConnectionsRef.current[peerId];
                   }
                   if (audioElementsRef.current[peerId]) {
-                    audioElementsRef.current[peerId].pause();
-                    audioElementsRef.current[peerId].srcObject = null;
+                    try {
+                      audioElementsRef.current[peerId].pause();
+                      audioElementsRef.current[peerId].srcObject = null;
+                    } catch (e) {}
                     delete audioElementsRef.current[peerId];
                   }
                   if (watchdogTimersRef.current[peerId]) {
@@ -365,6 +369,8 @@ export default function RoomPage() {
                     delete watchdogTimersRef.current[peerId];
                   }
                   delete makingOfferRef.current[peerId];
+                  delete isSettingRemoteAnswerPendingRef.current[peerId];
+                  delete signalingQueueRef.current[peerId];
                   delete pendingIceCandidatesRef.current[peerId];
                   setRemoteStreams(prev => {
                     const next = { ...prev };
@@ -382,13 +388,15 @@ export default function RoomPage() {
               // 2. Deterministically initiate peer connections to any active call participants
               if (isInCallRef.current && localStreamRef.current) {
                 newActiveUsers.forEach(peerId => {
-                  if (peerId !== myUserIdRef.current) {
+                  if (peerId !== myUserIdRef.current && myUserIdRef.current < peerId) {
                     const existingPc = peerConnectionsRef.current[peerId];
-                    const isHealthy = existingPc &&
-                      (existingPc.connectionState === 'connected' || existingPc.iceConnectionState === 'connected');
+                    const isConnectingOrConnected = existingPc &&
+                      existingPc.signalingState !== 'closed' &&
+                      (existingPc.connectionState === 'connected' || existingPc.connectionState === 'connecting' ||
+                       existingPc.iceConnectionState === 'connected' || existingPc.iceConnectionState === 'checking');
 
-                    // Lower userId initiates to higher userId to guarantee 1-to-1 connection pairs
-                    if (!isHealthy && myUserIdRef.current < peerId) {
+                    // Lower userId initiates to higher userId only if not already connecting or connected
+                    if (!isConnectingOrConnected) {
                       createPeerConnection(peerId, true);
                     }
                   }
@@ -917,10 +925,20 @@ export default function RoomPage() {
         localStreamRef.current.getTracks().forEach(t => t.stop());
         localStreamRef.current = null;
       }
+      // Close all watchdog timers
+      Object.keys(watchdogTimersRef.current).forEach(peerId => {
+        clearTimeout(watchdogTimersRef.current[peerId]);
+        delete watchdogTimersRef.current[peerId];
+      });
       // Close all peer connections
-      Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
+      Object.values(peerConnectionsRef.current).forEach(pc => {
+        try { pc.close(); } catch (e) {}
+      });
       peerConnectionsRef.current = {};
       pendingIceCandidatesRef.current = {};
+      makingOfferRef.current = {};
+      isSettingRemoteAnswerPendingRef.current = {};
+      signalingQueueRef.current = {};
 
       // Stop and clean up all persistent consumer audio elements
       Object.values(audioElementsRef.current).forEach(audio => {
@@ -1002,7 +1020,15 @@ export default function RoomPage() {
 
       activePeers.forEach(targetId => {
         if (targetId !== myUserIdRef.current && myUserIdRef.current < targetId) {
-          createPeerConnection(targetId, true);
+          const existingPc = peerConnectionsRef.current[targetId];
+          const isConnectingOrConnected = existingPc &&
+            existingPc.signalingState !== 'closed' &&
+            (existingPc.connectionState === 'connected' || existingPc.connectionState === 'connecting' ||
+             existingPc.iceConnectionState === 'connected' || existingPc.iceConnectionState === 'checking');
+
+          if (!isConnectingOrConnected) {
+            createPeerConnection(targetId, true);
+          }
         }
       });
     } catch (err) {
@@ -1011,8 +1037,16 @@ export default function RoomPage() {
     }
   };
 
-  const sendOffer = async (pc, targetUserId, isIceRestart = false) => {
+  const sendOffer = async (targetUserId, isIceRestart = false) => {
+    const pc = peerConnectionsRef.current[targetUserId];
     if (!pc || pc.signalingState === 'closed') return;
+
+    // In Perfect Negotiation, an offer can only be sent from the stable state
+    if (pc.signalingState !== 'stable') {
+      console.warn(`[WebRTC] Cannot send offer to ${targetUserId}: signalingState is ${pc.signalingState}`);
+      return;
+    }
+
     try {
       makingOfferRef.current[targetUserId] = true;
       const offerOptions = {
@@ -1024,7 +1058,10 @@ export default function RoomPage() {
         offerOptions.iceRestart = true;
       }
       const offer = await pc.createOffer(offerOptions);
-      if (pc.signalingState === 'closed') return;
+      if (pc.signalingState !== 'stable') {
+        console.warn(`[WebRTC] Aborting setLocalDescription for ${targetUserId}: state transitioned to ${pc.signalingState}`);
+        return;
+      }
       await pc.setLocalDescription(offer);
 
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -1041,13 +1078,49 @@ export default function RoomPage() {
     }
   };
 
+  const queueSendOffer = (targetUserId, isIceRestart = false) => {
+    signalingQueueRef.current[targetUserId] = (signalingQueueRef.current[targetUserId] || Promise.resolve())
+      .then(() => sendOffer(targetUserId, isIceRestart))
+      .catch(err => console.error(`[WebRTC] Error in queued sendOffer for ${targetUserId}:`, err));
+  };
+
+  const reconnectPeer = (targetUserId) => {
+    if (!isInCallRef.current || !localStreamRef.current) return;
+    if (myUserIdRef.current >= targetUserId) return; // Only deterministic initiator recovers
+
+    console.log(`[WebRTC] Reconnecting peer session to ${targetUserId}...`);
+
+    // 1. Notify remote peer to reset its PC
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'webrtc-signal',
+        targetUserId: targetUserId,
+        signal: { type: 'reset-peer' }
+      }));
+    }
+
+    // 2. Clean up local PC
+    const oldPc = peerConnectionsRef.current[targetUserId];
+    if (oldPc) {
+      try { oldPc.close(); } catch (e) {}
+      delete peerConnectionsRef.current[targetUserId];
+    }
+    delete pendingIceCandidatesRef.current[targetUserId];
+    delete makingOfferRef.current[targetUserId];
+    delete isSettingRemoteAnswerPendingRef.current[targetUserId];
+
+    // 3. Delay slightly to allow reset-peer message to reach responder before fresh offer
+    setTimeout(() => {
+      if (isInCallRef.current && localStreamRef.current) {
+        createPeerConnection(targetUserId, true);
+      }
+    }, 150);
+  };
+
   const createPeerConnection = (targetUserId, isInitiator) => {
     let pc = peerConnectionsRef.current[targetUserId];
     if (pc && pc.signalingState !== 'closed' && pc.connectionState !== 'failed' && pc.iceConnectionState !== 'failed') {
       ensureLocalTracksOnPeerConnection(pc);
-      if (isInitiator && pc.signalingState === 'stable') {
-        sendOffer(pc, targetUserId, false);
-      }
       return pc;
     }
 
@@ -1056,7 +1129,7 @@ export default function RoomPage() {
       delete peerConnectionsRef.current[targetUserId];
     }
 
-    // Dynamic STUN and TURN configuration for 100% multi-device NAT & firewall traversal
+    // Dynamic STUN and TURN configuration for multi-device NAT & firewall traversal
     pc = new RTCPeerConnection({
       iceServers: iceServersRef.current,
       bundlePolicy: 'max-bundle',
@@ -1074,8 +1147,11 @@ export default function RoomPage() {
     };
 
     const startWatchdog = () => {
+      // ONLY the initiator (lower userId) runs watchdog recovery to prevent race conditions
+      if (myUserIdRef.current >= targetUserId) return;
       if (watchdogTimersRef.current[targetUserId]) return;
-      watchdogTimersRef.current[targetUserId] = setTimeout(async () => {
+
+      watchdogTimersRef.current[targetUserId] = setTimeout(() => {
         delete watchdogTimersRef.current[targetUserId];
         const currentPc = peerConnectionsRef.current[targetUserId];
         if (!currentPc || currentPc.signalingState === 'closed') return;
@@ -1083,23 +1159,13 @@ export default function RoomPage() {
         const cState = currentPc.connectionState;
         const iState = currentPc.iceConnectionState;
         if (cState !== 'connected' && iState !== 'connected' && iState !== 'completed') {
-          console.warn(`[WebRTC Watchdog] Peer ${targetUserId} connection stalled (${cState}/${iState}). Attempting recovery...`);
-          if (myUserIdRef.current < targetUserId) {
-            sendOffer(currentPc, targetUserId, true);
-          } else {
-            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-              socketRef.current.send(JSON.stringify({
-                type: 'webrtc-signal',
-                targetUserId: targetUserId,
-                signal: { type: 'request-restart' }
-              }));
-            }
-          }
+          console.warn(`[WebRTC Watchdog] Initiator ${myUserIdRef.current} detected stalled connection to ${targetUserId} (${cState}/${iState}). Attempting recovery...`);
+          reconnectPeer(targetUserId);
         }
-      }, 7000);
+      }, 8000);
     };
 
-    // Track WebRTC connection lifecycle states: mark connected if either DTLS or ICE succeeds
+    // Track WebRTC connection lifecycle states
     const updateConnState = () => {
       const connState = pc.connectionState;
       const iceState = pc.iceConnectionState;
@@ -1118,9 +1184,9 @@ export default function RoomPage() {
     pc.onconnectionstatechange = () => {
       updateConnState();
       if (pc.connectionState === 'failed') {
-        console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed. Performing recovery...`);
+        console.warn(`[WebRTC] PeerConnection to ${targetUserId} failed.`);
         if (myUserIdRef.current < targetUserId) {
-          sendOffer(pc, targetUserId, true);
+          reconnectPeer(targetUserId);
         }
       }
     };
@@ -1128,8 +1194,9 @@ export default function RoomPage() {
     pc.oniceconnectionstatechange = () => {
       updateConnState();
       if (pc.iceConnectionState === 'failed') {
+        console.warn(`[WebRTC] ICE connection to ${targetUserId} failed.`);
         if (myUserIdRef.current < targetUserId) {
-          sendOffer(pc, targetUserId, true);
+          reconnectPeer(targetUserId);
         }
       }
     };
@@ -1158,7 +1225,7 @@ export default function RoomPage() {
         event.track.enabled = true;
       }
 
-      // 1. Consumer Audio Pipeline: Persistent HTMLAudioElement (Immune to React re-renders)
+      // 1. Consumer Audio Pipeline: Persistent HTMLAudioElement
       let audioTrack = null;
       if (event.track && event.track.kind === 'audio') {
         audioTrack = event.track;
@@ -1177,7 +1244,6 @@ export default function RoomPage() {
           audioElementsRef.current[targetUserId] = audioEl;
         }
 
-        // Deduplicate audio track: only attach if not already present on audio element
         const existingTrack = audioEl.srcObject?.getAudioTracks()?.[0];
         if (!existingTrack || existingTrack.id !== audioTrack.id) {
           audioEl.srcObject = new MediaStream([audioTrack]);
@@ -1221,13 +1287,13 @@ export default function RoomPage() {
     };
 
     if (isInitiator) {
-      sendOffer(pc, targetUserId, false);
+      queueSendOffer(targetUserId, false);
     }
 
     return pc;
   };
 
-  const handleIncomingSignal = async (senderUserId, signal) => {
+  const processIncomingSignal = async (senderUserId, signal) => {
     let pc = peerConnectionsRef.current[senderUserId];
     // In standard W3C Perfect Negotiation:
     // Initiator (myUserId < senderUserId) is IMPOLITE.
@@ -1236,61 +1302,91 @@ export default function RoomPage() {
 
     try {
       if (signal.type === 'offer') {
-        // Only process offer if local user is in the call
         if (!isInCallRef.current || !localStreamRef.current) return;
 
         if (!pc || pc.signalingState === 'closed' || pc.connectionState === 'failed') {
+          if (pc) {
+            try { pc.close(); } catch (e) {}
+            delete peerConnectionsRef.current[senderUserId];
+          }
           pc = createPeerConnection(senderUserId, false);
         }
 
         ensureLocalTracksOnPeerConnection(pc);
 
-        const isCollision = makingOfferRef.current[senderUserId] || (pc && pc.signalingState !== 'stable');
-        if (isCollision) {
+        // Perfect Negotiation Collision Check
+        const readyForOffer = !makingOfferRef.current[senderUserId] &&
+          (pc.signalingState === 'stable' || isSettingRemoteAnswerPendingRef.current[senderUserId]);
+        const isOfferCollision = !readyForOffer;
+
+        if (isOfferCollision) {
           if (!isPolite) {
-            // Impolite peer ignores incoming offer during glare
+            console.log(`[WebRTC] Collision: impolite peer ${myUserIdRef.current} ignoring offer from ${senderUserId}`);
             return;
           }
-          // Polite peer rolls back local offer to accept remote offer
-          await pc.setLocalDescription({ type: 'rollback' });
+          // Polite peer yields: ONLY rollback if local offer is actually pending
+          if (pc.signalingState === 'have-local-offer') {
+            console.log(`[WebRTC] Collision: polite peer ${myUserIdRef.current} rolling back local offer for ${senderUserId}`);
+            await pc.setLocalDescription({ type: 'rollback' });
+          }
+        }
+
+        if (pc.signalingState !== 'stable') {
+          console.warn(`[WebRTC] Cannot setRemoteDescription for ${senderUserId}: signalingState is ${pc.signalingState}`);
+          return;
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
         await flushPendingIceCandidates(pc, senderUserId);
 
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        if (pc.signalingState === 'have-remote-offer') {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
 
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-          socketRef.current.send(JSON.stringify({
-            type: 'webrtc-signal',
-            targetUserId: senderUserId,
-            signal: { type: 'answer', answer: pc.localDescription }
-          }));
+          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify({
+              type: 'webrtc-signal',
+              targetUserId: senderUserId,
+              signal: { type: 'answer', answer: pc.localDescription }
+            }));
+          }
         }
       } else if (signal.type === 'answer') {
-        if (pc && pc.signalingState !== 'closed') {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
-          await flushPendingIceCandidates(pc, senderUserId);
+        if (!pc || pc.signalingState === 'closed') return;
+
+        // An answer is only valid when waiting for remote answer (have-local-offer)
+        if (pc.signalingState === 'have-local-offer') {
+          isSettingRemoteAnswerPendingRef.current[senderUserId] = true;
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+            await flushPendingIceCandidates(pc, senderUserId);
+          } finally {
+            isSettingRemoteAnswerPendingRef.current[senderUserId] = false;
+          }
+        } else {
+          console.warn(`[WebRTC] Ignoring unexpected answer from ${senderUserId} in state: ${pc.signalingState}`);
         }
       } else if (signal.type === 'candidate') {
-        if (pc && pc.signalingState !== 'closed') {
-          await addIceCandidateSafely(pc, senderUserId, signal.candidate);
-        } else {
-          if (!pendingIceCandidatesRef.current[senderUserId]) {
-            pendingIceCandidatesRef.current[senderUserId] = [];
-          }
-          pendingIceCandidatesRef.current[senderUserId].push(signal.candidate);
+        await addIceCandidateSafely(pc, senderUserId, signal.candidate);
+      } else if (signal.type === 'reset-peer') {
+        console.log(`[WebRTC] Peer ${senderUserId} requested connection reset.`);
+        if (pc) {
+          try { pc.close(); } catch (e) {}
+          delete peerConnectionsRef.current[senderUserId];
         }
-      } else if (signal.type === 'request-restart') {
-        if (pc && pc.signalingState !== 'closed') {
-          console.log(`[WebRTC] Received ICE restart request from ${senderUserId}. Initiating restart...`);
-          sendOffer(pc, senderUserId, true);
-        }
+        delete pendingIceCandidatesRef.current[senderUserId];
+        delete makingOfferRef.current[senderUserId];
+        delete isSettingRemoteAnswerPendingRef.current[senderUserId];
       }
     } catch (err) {
-      console.error(`[WebRTC] Error handling signal from ${senderUserId}:`, err);
+      console.error(`[WebRTC] Error processing signal from ${senderUserId}:`, err);
     }
+  };
+
+  const handleIncomingSignal = (senderUserId, signal) => {
+    signalingQueueRef.current[senderUserId] = (signalingQueueRef.current[senderUserId] || Promise.resolve())
+      .then(() => processIncomingSignal(senderUserId, signal))
+      .catch(err => console.error(`[WebRTC] Queue error for ${senderUserId}:`, err));
   };
 
   const handleToggleMute = () => {
@@ -1320,20 +1416,15 @@ export default function RoomPage() {
           const newTrack = videoStream.getVideoTracks()[0];
           localStreamRef.current.addTrack(newTrack);
 
-          // Add new video track to all active peer connections and renegotiate
+          // Add new video track to all active peer connections and renegotiate safely
           Object.entries(peerConnectionsRef.current).forEach(([targetId, pc]) => {
             if (pc && pc.signalingState !== 'closed') {
-              pc.addTrack(newTrack, localStreamRef.current);
-              pc.createOffer().then(offer => {
-                pc.setLocalDescription(offer);
-                if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-                  socketRef.current.send(JSON.stringify({
-                    type: 'webrtc-signal',
-                    targetUserId: targetId,
-                    signal: { type: 'offer', offer: offer }
-                  }));
-                }
-              });
+              try {
+                pc.addTrack(newTrack, localStreamRef.current);
+              } catch (e) {
+                console.warn('Error adding video track to PC:', e);
+              }
+              queueSendOffer(targetId, false);
             }
           });
 
